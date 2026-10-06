@@ -644,7 +644,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.35";
+  const APP_VERSION_NAME = "1.36";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -997,11 +997,14 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     let lowerCity = null, lowerPrice = Infinity;
     let sellCity = null, sellPrice = -Infinity;
     const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
+    const rawT = trollFlags(resource.key, 'raw');
+    const lowerT = trollFlags(resource.key, 'lower');
+    const refT = trollFlags(resource.key, 'refined');
     routeCities.forEach(c => {
       const raw = prices[c].raw, refined = prices[c].refined, lower = prices[c].lower;
-      if (raw !== null && raw > 0 && raw < buyPrice) { buyPrice = raw; buyCity = c; }
-      if (refined !== null && refined > 0 && refined > sellPrice) { sellPrice = refined; sellCity = c; }
-      if (lower !== null && lower > 0 && lower < lowerPrice) { lowerPrice = lower; lowerCity = c; }
+      if (!rawT[c] && raw !== null && raw > 0 && raw < buyPrice) { buyPrice = raw; buyCity = c; }
+      if (!refT[c] && refined !== null && refined > 0 && refined > sellPrice) { sellPrice = refined; sellCity = c; }
+      if (!lowerT[c] && lower !== null && lower > 0 && lower < lowerPrice) { lowerPrice = lower; lowerCity = c; }
     });
     if (!buyCity || !sellCity) return { ok:false };
     if (recipe.lower && !lowerCity) return { ok:false };
@@ -1041,6 +1044,33 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
   function wideBadge(wide) {
     if (!wide) return '';
     return ` <span class="wide-flag" title="This city's sell book looked dirty (listings spanning a huge range — bait or troll orders). The price shown is the cheapest listing, but double-check in game before hauling.">⚠</span>`;
+  }
+
+  // Troll check: the community price feed reports whatever players' data clients
+  // last saw, so in a thin city book a single bait/troll listing can BE the whole
+  // book (the wide-book check can't catch it — there's no range to span). A price
+  // far from the cross-city median is almost certainly one of those. Flagged
+  // prices get a warning badge, are never highlighted best/worst, and are ignored
+  // when the route picker chooses buy/sell cities.
+  const TROLL_RATIO = 4;
+  function trollFlags(resourceKey, field) {
+    const prices = state.prices[resourceKey];
+    const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
+    const vals = routeCities.map(c => prices[c][field]).filter(v => v !== null && v > 0).sort((a, b) => a - b);
+    if (vals.length < 3) return {};
+    const mid = Math.floor(vals.length / 2);
+    const median = vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+    const flags = {};
+    routeCities.forEach(c => {
+      const v = prices[c][field];
+      if (v !== null && v > 0 && (v >= median * TROLL_RATIO || v <= median / TROLL_RATIO)) flags[c] = true;
+    });
+    return flags;
+  }
+
+  function trollBadge(troll) {
+    if (!troll) return '';
+    return ` <span class="wide-flag" title="Far from every other city's price — likely a bait/troll listing in a thin market book. Ignored when picking the route below; double-check in game before hauling.">⚠ troll</span>`;
   }
 
   function renderOverview() {
@@ -1394,18 +1424,22 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const lowerEnchLbl = (tierNum === 4 && ench > 0) ? '' : enchLbl;
     // Best/worst price highlights use the same city set the routes use.
     const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
-    const extremes = field => {
-      const vals = routeCities.map(c => prices[c][field]).filter(v => v !== null && v > 0);
+    const extremes = (field, trolls) => {
+      const vals = routeCities.filter(c => !(trolls && trolls[c])).map(c => prices[c][field]).filter(v => v !== null && v > 0);
       if (vals.length < 2) return null;
       const lo = Math.min(...vals), hi = Math.max(...vals);
       return lo === hi ? null : { lo, hi };
     };
-    const rawX = extremes('raw');
-    const lowerX = recipe.lower ? extremes('lower') : null;
-    const refX = extremes('refined');
+    const rawT = trollFlags(resource.key, 'raw');
+    const lowerT = recipe.lower ? trollFlags(resource.key, 'lower') : {};
+    const refT = trollFlags(resource.key, 'refined');
+    const rawX = extremes('raw', rawT);
+    const lowerX = recipe.lower ? extremes('lower', lowerT) : null;
+    const refX = extremes('refined', refT);
     // For buy columns the cheapest is best; for the sell column the priciest is best.
-    const pkCls = (x, v, invert) => {
-      if (!x || v === null || v <= 0) return '';
+    // Troll-flagged prices are never highlighted — a troll "best" price is a lie.
+    const pkCls = (x, v, invert, troll) => {
+      if (!x || v === null || v <= 0 || troll) return '';
       if (!invert) return v === x.lo ? 'pk-good' : (v === x.hi ? 'pk-bad' : '');
       return v === x.hi ? 'pk-good' : (v === x.lo ? 'pk-bad' : '');
     };
@@ -1417,20 +1451,20 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const rawLiveCls = prices[c].rawLive ? 'live-fill' : '';
       const refLiveCls = prices[c].refinedLive ? 'live-fill' : '';
       const lowerLiveCls = prices[c].lowerLive ? 'live-fill' : '';
-      const rawPk = pkCls(rawX, prices[c].raw, false);
-      const refPk = pkCls(refX, prices[c].refined, true);
-      const lowerPk = pkCls(lowerX, prices[c].lower, false);
+      const rawPk = pkCls(rawX, prices[c].raw, false, rawT[c]);
+      const refPk = pkCls(refX, prices[c].refined, true, refT[c]);
+      const lowerPk = pkCls(lowerX, prices[c].lower, false, lowerT[c]);
       const lowerCell = recipe.lower
         ? `<td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 210" class="${lowerLiveCls} ${lowerPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}</td>`
+             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}</td>`
         : '';
       return `<tr class="${isBonus ? 'bonus-row' : ''}">
         <td class="city-cell">${c}${isBonus ? ' ★' : ''}</td>
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 120" class="${rawLiveCls} ${rawPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}</td>
         ${lowerCell}
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 340" class="${refLiveCls} ${refPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refinedT[c])}</td>
       </tr>`;
     }).join('');
 
@@ -1441,7 +1475,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       </div>
       <p class="bonus-note">★ <b>${resource.bonusCity}</b> gives the resource-return bonus for this line — refine here for the yield used below. White-outlined fields were filled by the last live fetch. <span class="pk-legend-good">Green</span> = best price for you, <span class="pk-legend-bad">red</span> = worst.</p>
       <p class="bonus-note">Recipe: <b>${recipeLabel(resource, tierNum, state.enchant)}</b> — the return rate applies to every input.</p>
-      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
+      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
       <div class="settings-row">
         <div class="field"><label>Batch size</label><input type="number" min="1" step="1" id="batch-${resource.key}" value="${state.batch}"></div>
         <div class="field"><label>Sales tax %</label><input type="number" min="0" step="0.5" id="tax-${resource.key}" value="${state.tax}"></div>
