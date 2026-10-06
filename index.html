@@ -644,7 +644,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.36";
+  const APP_VERSION_NAME = "1.37";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1464,7 +1464,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
              data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}</td>
         ${lowerCell}
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 340" class="${refLiveCls} ${refPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refinedT[c])}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}</td>
       </tr>`;
     }).join('');
 
