@@ -644,7 +644,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.34";
+  const APP_VERSION_NAME = "1.35";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -3694,8 +3694,16 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
         return;
       }
 
-      let filled = 0;
       let usedLevelInfix = false;
+      // Fresh prices from THIS fetch only. When enchant > 0, both ID variants
+      // ("T4_FIBER@2" and "T4_FIBER_LEVEL2@2") can return data for the same
+      // city -- keep the higher of the two within this fetch, since a real
+      // listing beats a stale/zero one from the ID format that doesn't exist.
+      // The stored price is then overwritten with the fresh value, so prices
+      // track the market down as well as up. (Previously the stored value was
+      // only ever replaced by a higher one, so a price could never decrease
+      // and looked frozen whenever the market moved down.)
+      const fresh = {};
       data.forEach(entry => {
         const match = /^T(\d+)_([A-Z_]+?)(?:_LEVEL\d)?(?:@\d)?$/.exec(entry.item_id);
         if (!match) return;
@@ -3707,58 +3715,41 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
         const resource = RESOURCES.find(r => r.rawId === base || r.refinedId === base);
         if (!resource || !CITIES.includes(entry.city)) return;
         if (entry.item_id.includes('_LEVEL')) usedLevelInfix = true;
-        const cityPrices = state.prices[resource.key][entry.city];
 
-        if (entryTier === tierNum && resource.rawId === base) {
-          // Buy side: what you'd actually pay taking the cheapest listing.
-          // A dirty book (troll max or bait min) is flagged wide instead of
-          // guessed at — the cheapest listing is still the price you trade at.
-          const rp = realisticSellPrice(entry.sell_price_min, entry.sell_price_max);
-          const price = rp.price;
-          if (price && price > 0) {
-            // If both ID variants returned a price for this city, keep whichever is higher —
-            // a real listing beats a stale/zero one from the ID format that doesn't exist.
-            const existing = cityPrices.raw;
-            if (!existing || price > existing) {
-              cityPrices.raw = price;
-              cityPrices.rawLive = true;
-              cityPrices.rawWide = rp.wide;
-              cityPrices.rawTs = entryTs(entry, ['sell_price_min_date', 'sell_price_max_date']) || Date.now();
-            }
-            filled++;
-          }
-        } else if (entryTier === tierNum && resource.refinedId === base) {
-          // Sell side: realistic estimate of what a listing fetches — the cheapest
-          // listing, which is what your sell order competes with.
-          const lo = entry.sell_price_min, hi = entry.sell_price_max;
-          const avg = realisticSellPrice(lo, hi);
-          const price = avg.price;
-          if (price && price > 0) {
-            const existing = cityPrices.refined;
-            if (!existing || price > existing) {
-              cityPrices.refined = price;
-              cityPrices.refinedLive = true;
-              cityPrices.refinedWide = avg.wide;
-              cityPrices.refinedTs = entryTs(entry, ['sell_price_min_date', 'sell_price_max_date']) || Date.now();
-            }
-            filled++;
-          }
-        } else if (entryTier === tierNum - 1 && resource.refinedId === base) {
-          // Lower-tier refined the recipe needs — bought, so use the cheapest
-          // listing; flag the book wide instead of guessing when it's dirty.
-          const lp = realisticSellPrice(entry.sell_price_min, entry.sell_price_max);
-          const price = lp.price;
-          if (price && price > 0) {
-            const existing = cityPrices.lower;
-            if (!existing || price > existing) {
-              cityPrices.lower = price;
-              cityPrices.lowerLive = true;
-              cityPrices.lowerWide = lp.wide;
-              cityPrices.lowerTs = entryTs(entry, ['sell_price_min_date', 'sell_price_max_date']) || Date.now();
-            }
-            filled++;
-          }
+        // raw = buy side (cheapest listing = what you'd pay); refined = sell
+        // side (cheapest listing = what your order competes with); lower =
+        // lower-tier refined the recipe needs (bought). Dirty books get flagged
+        // wide instead of guessed at -- the cheapest listing is the tradable one.
+        let side = null;
+        if (entryTier === tierNum && resource.rawId === base) side = 'raw';
+        else if (entryTier === tierNum && resource.refinedId === base) side = 'refined';
+        else if (entryTier === tierNum - 1 && resource.refinedId === base) side = 'lower';
+        if (!side) return;
+        const rp = realisticSellPrice(entry.sell_price_min, entry.sell_price_max);
+        const price = rp.price;
+        if (!price || price <= 0) return;
+        const key = resource.key + '|' + entry.city + '|' + side;
+        const cur = fresh[key];
+        if (!cur || price > cur.price) {
+          fresh[key] = {
+            price: price,
+            wide: rp.wide,
+            ts: entryTs(entry, ['sell_price_min_date', 'sell_price_max_date']) || Date.now()
+          };
         }
+      });
+
+      let filled = 0;
+      Object.keys(fresh).forEach(key => {
+        const parts = key.split('|');
+        const cityPrices = state.prices[parts[0]][parts[1]];
+        const side = parts[2];
+        const f = fresh[key];
+        cityPrices[side] = f.price;
+        cityPrices[side + 'Live'] = true;
+        cityPrices[side + 'Wide'] = f.wide;
+        cityPrices[side + 'Ts'] = f.ts;
+        filled++;
       });
 
       save();
