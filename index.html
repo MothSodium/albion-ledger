@@ -177,6 +177,13 @@
   .panel-title h3 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
   .panel-title span { font-size: 11.5px; color: var(--text-dim); }
   .bonus-note { font-size: 12.5px; color: var(--text-dim); margin: 0 0 14px; line-height: 1.5; }
+  .howto { border: 1px solid var(--line); border-radius: 12px; margin: 0 0 12px; background: rgba(255,255,255,0.02); }
+  .howto summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 13px; color: var(--text-dim); list-style: none; }
+  .howto summary::-webkit-details-marker { display: none; }
+  .howto summary::before { content: '\25b8  '; }
+  .howto[open] summary::before { content: '\25be  '; }
+  .howto .howto-body { padding: 2px 14px 6px; }
+  .howto .howto-body .bonus-note { margin: 8px 0; }
   .bonus-note b { color: var(--accent-bright); font-weight: 700; }
 
   .settings-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -475,7 +482,7 @@
 <header class="hero">
     <h1>Trade Ledger — Live</h1>
     <div class="app-version" id="app-version"></div>
-    <p>Six workshops fed by live Albion Online Data Project prices: refine raw materials, craft gear, flip the Black Market, flip items between cities, brew potions — plus profit alerts that watch the market for you. Pick one below — every price field stays editable if you want to override by hand.</p>
+    <p>Live Albion market prices across six workshops — refining, crafting, flipping, Black Market, potions — plus profit alerts. Every price field stays editable.</p>
   </header>
     <div class="home-grid">
       <button class="cat-card" data-view="refining" style="--cat:#f59e0b">
@@ -510,9 +517,13 @@
       </button>
     </div>
   <footer>
-    Live prices come from the community-run <code>albion-online-data.com</code> API and reflect whatever players running its data client last reported — some cities/items update within minutes, others may be stale for hours, so check the "Updated" age on scan results before hauling. Refining profit = (batch × sell price) − (batch × (1 − return rate) × recipe material cost), minus sales tax; the material cost follows the in-game refining recipe for the selected tier (T2: 1x raw; T3/T4: 2x raw + 1x lower-tier refined; T5: 3x + 1x; T6: 4x + 1x; T7/T8: 5x + 1x — enchanted T4 chains use unenchanted T3 refined, and stone has no enchanted variants). Crafting and potion costs use the real in-game recipes, including artifacts, crests and silver fees. This leaves out station fees, transport, and specialization discounts, so treat it as a comparison between routes rather than an exact silver count.<br><br>
-    If "Fetch live prices" fails right after opening this file directly (a <code>file://</code> address), your browser may be blocking the request — try serving it from a local server instead (for example running <code>python3 -m http.server</code> in this file's folder and opening it at <code>http://localhost:8000/</code>).
-  </footer>
+    <details class="howto">
+      <summary>About the data &amp; math</summary>
+      <div class="howto-body">
+    <p class="bonus-note">Live prices come from the community-run <code>albion-online-data.com</code> API and reflect whatever players running its data client last reported — some cities/items update within minutes, others may be stale for hours, so check the "Updated" age on scan results before hauling. Refining profit = (batch × sell price) − (batch × (1 − return rate) × recipe material cost), minus sales tax; the material cost follows the in-game refining recipe for the selected tier (T2: 1x raw; T3/T4: 2x raw + 1x lower-tier refined; T5: 3x + 1x; T6: 4x + 1x; T7/T8: 5x + 1x — enchanted T4 chains use unenchanted T3 refined, and stone has no enchanted variants). Crafting and potion costs use the real in-game recipes, including artifacts, crests and silver fees. This leaves out station fees, transport, and specialization discounts, so treat it as a comparison between routes rather than an exact silver count.<br><br>
+    If "Fetch live prices" fails right after opening this file directly (a <code>file://</code> address), your browser may be blocking the request — try serving it from a local server instead (for example running <code>python3 -m http.server</code> in this file's folder and opening it at <code>http://localhost:8000/</code>).</p>
+      </div>
+    </details>
   </footer>
   </div>
 
@@ -644,7 +655,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.38";
+  const APP_VERSION_NAME = "1.39";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1537,16 +1548,21 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         <h3>${resource.raw} → ${resource.refined}</h3>
         <span>refining bonus: ${resource.bonusCity}</span>
       </div>
+      <details class="howto">
+        <summary>How this works</summary>
+        <div class="howto-body">
       <p class="bonus-note">★ <b>${resource.bonusCity}</b> gives the resource-return bonus for this line — refine here for the yield used below. White-outlined fields were filled by the last live fetch. <span class="pk-legend-good">Green</span> = best price for you, <span class="pk-legend-bad">red</span> = worst.</p>
       <p class="bonus-note">Recipe: <b>${recipeLabel(resource, tierNum, state.enchant)}</b> — the return rate applies to every input.</p>
       <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — or its own recent average — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
+        </div>
+      </details>
       <div class="settings-row">
         <div class="field"><label>Batch size</label><input type="number" min="1" step="1" id="batch-${resource.key}" value="${state.batch}"></div>
         <div class="field"><label>Sales tax %</label><input type="number" min="0" step="0.5" id="tax-${resource.key}" value="${state.tax}"></div>
         <div class="field"><label>Sell via</label>
           <select id="sellmode-${resource.key}">
-            <option value="list" ${state.refSellMode !== 'instant' ? 'selected' : ''}>List order (~6.5% fees)</option>
-            <option value="instant" ${state.refSellMode === 'instant' ? 'selected' : ''}>Instant sale (~${fmt(parseFloat(state.tax) || 0)}% tax)</option>
+            <option value="list" ${state.refSellMode !== 'instant' ? 'selected' : ''}>List order</option>
+            <option value="instant" ${state.refSellMode === 'instant' ? 'selected' : ''}>Instant sale</option>
           </select>
         </div>
         <div class="field"><label>Focus / unit</label><input type="number" min="0" step="1" id="focus-${resource.key}" value="${state.focusPerUnit || 0}"></div>
@@ -1558,13 +1574,13 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         </div>
         <div class="field"><label class="checkline"><input type="checkbox" id="usefocus-${resource.key}" ${state.useFocus ? 'checked' : ''}> Use focus</label></div>
       </div>
+      <div class="result-card" id="result-${resource.key}"></div>
       <div class="table-scroll">
         <table class="price-table">
           <thead><tr><th>City</th><th>Raw buy price</th>${recipe.lower ? `<th>Lower buy · T${tierNum - 1}${lowerEnchLbl} ${resource.refined}</th>` : ''}<th>Refined sell price</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <div class="result-card" id="result-${resource.key}"></div>
       <button class="reset-btn" data-reset="${resource.key}">Clear ${resource.raw} prices</button>
     `;
   }
