@@ -644,7 +644,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.37";
+  const APP_VERSION_NAME = "1.38";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -864,7 +864,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     region: 'west', tier: 4, enchant: 0, sellMode: 'instant',
     includeCaerleon: false, view: 'home', compact: false, autoRefresh: true,
     focusPerUnit: 0, allocBudget: 1000000,
-    prices: {}, priceHistory: {},
+    prices: {}, priceHistory: {}, history: {},
     alerts: { rules: [], log: [] },
     blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'profit', tier: 'all' } },
     flipping: { items: [], quantity: 10, tax: 4, sellMode: 'instant', data: {}, advisor: { max: 80, qty: 10, sort: 'profit' } },
@@ -893,6 +893,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         focusPerUnit: saved.focusPerUnit ?? state.focusPerUnit,
         allocBudget: saved.allocBudget ?? state.allocBudget,
         priceHistory: (saved.priceHistory && typeof saved.priceHistory === 'object') ? saved.priceHistory : {},
+        history: (saved.history && typeof saved.history === 'object') ? saved.history : {},
         alerts: (saved.alerts && typeof saved.alerts === 'object') ? { rules: Array.isArray(saved.alerts.rules) ? saved.alerts.rules : [], log: Array.isArray(saved.alerts.log) ? saved.alerts.log.slice(-30) : [] } : state.alerts,
       });
       if (saved.blackMarket && typeof saved.blackMarket === 'object') {
@@ -1053,24 +1054,87 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
   // prices get a warning badge, are never highlighted best/worst, and are ignored
   // when the route picker chooses buy/sell cities.
   const TROLL_RATIO = 4;
+  // History anchor: the Data Project's charts endpoint returns daily average
+  // prices + listing counts per city. Averages can't be moved by a single troll
+  // listing, so a live price far from its own recent average is flagged even
+  // when every city is quiet (where the cross-city check has nothing to compare).
+  const HIST_DAYS = 7, HIST_MIN_COUNT = 8, HIST_RATIO = 3, HIST_MAX_AGE_MS = 3 * 24 * 3600 * 1000;
+  function ingestHistory(data, tierNum) {
+    if (!state.history || typeof state.history !== 'object') state.history = {};
+    const perVariant = {};
+    (Array.isArray(data) ? data : []).forEach(entry => {
+      if ('quality' in entry && entry.quality !== 1) return;
+      const match = /^T(\d+)_([A-Z_]+?)(?:_LEVEL\d)?(?:@\d)?$/.exec(entry.item_id || '');
+      if (!match) return;
+      const entryTier = parseInt(match[1], 10);
+      const base = match[2];
+      const resource = RESOURCES.find(r => r.rawId === base || r.refinedId === base);
+      if (!resource || !CITIES.includes(entry.location)) return;
+      let side = null;
+      if (entryTier === tierNum && resource.rawId === base) side = 'raw';
+      else if (entryTier === tierNum && resource.refinedId === base) side = 'refined';
+      else if (entryTier === tierNum - 1 && resource.refinedId === base) side = 'lower';
+      if (!side) return;
+      const d = entry.data || {};
+      const avgs = d.prices_avg || [], counts = d.item_count || [];
+      const n = Math.min(avgs.length, counts.length);
+      let wSum = 0, wTot = 0, days = 0;
+      for (let i = Math.max(0, n - HIST_DAYS); i < n; i++) {
+        const c = counts[i] || 0, a = avgs[i] || 0;
+        if (c > 0 && a > 0) { wSum += a * c; wTot += c; days++; }
+      }
+      if (wTot <= 0) return;
+      const vkey = resource.key + '|' + entry.location + '|' + side + '|' + (entry.item_id.includes('_LEVEL') ? 'L' : 'G');
+      const cur = perVariant[vkey];
+      if (!cur || wTot > cur.wTot) perVariant[vkey] = { wSum, wTot, days };
+    });
+    const now = Date.now();
+    Object.keys(perVariant).forEach(vkey => {
+      const parts = vkey.split('|');
+      const rkey = parts[0], city = parts[1], side = parts[2];
+      const v = perVariant[vkey];
+      const h = state.history[rkey] || (state.history[rkey] = {});
+      const hc = h[city] || (h[city] = {});
+      const ex = hc[side];
+      // Keep the variant with the most backing data; always take the latest fetch.
+      if (!ex || v.wTot >= (ex.count || 0)) hc[side] = { avg: Math.round(v.wSum / v.wTot), count: v.wTot, days: v.days, ts: now };
+    });
+  }
+
   function trollFlags(resourceKey, field) {
     const prices = state.prices[resourceKey];
     const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
     const vals = routeCities.map(c => prices[c][field]).filter(v => v !== null && v > 0).sort((a, b) => a - b);
-    if (vals.length < 3) return {};
-    const mid = Math.floor(vals.length / 2);
-    const median = vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
     const flags = {};
+    if (vals.length >= 3) {
+      const mid = Math.floor(vals.length / 2);
+      const median = vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+      routeCities.forEach(c => {
+        const v = prices[c][field];
+        if (v !== null && v > 0 && (v >= median * TROLL_RATIO || v <= median / TROLL_RATIO)) flags[c] = { reason: 'city' };
+      });
+    }
+    // History-deviation check: a live price far from its own recent average.
+    const hist = (state.history && state.history[resourceKey]) || {};
+    const now = Date.now();
     routeCities.forEach(c => {
+      if (flags[c]) return;
       const v = prices[c][field];
-      if (v !== null && v > 0 && (v >= median * TROLL_RATIO || v <= median / TROLL_RATIO)) flags[c] = true;
+      const h = hist[c] && hist[c][field];
+      if (v !== null && v > 0 && h && h.avg > 0 && h.count >= HIST_MIN_COUNT && (now - h.ts) <= HIST_MAX_AGE_MS &&
+          (v >= h.avg * HIST_RATIO || v <= h.avg / HIST_RATIO)) {
+        flags[c] = { reason: 'history', avg: h.avg };
+      }
     });
     return flags;
   }
 
-  function trollBadge(troll) {
-    if (!troll) return '';
-    return ` <span class="wide-flag" title="Far from every other city's price — likely a bait/troll listing in a thin market book. Ignored when picking the route below; double-check in game before hauling.">⚠ troll</span>`;
+  function trollBadge(flag) {
+    if (!flag) return '';
+    const title = flag.reason === 'history'
+      ? `Way off its recent ${HIST_DAYS}-day average (~${fmt(flag.avg)}) — likely a bait/troll listing in a thin market book. Ignored when picking the route below; double-check in game before hauling.`
+      : `Far from every other city's price — likely a bait/troll listing in a thin market book. Ignored when picking the route below; double-check in game before hauling.`;
+    return ` <span class="wide-flag" title="${title}">⚠ troll</span>`;
   }
 
   function renderOverview() {
@@ -1475,7 +1539,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       </div>
       <p class="bonus-note">★ <b>${resource.bonusCity}</b> gives the resource-return bonus for this line — refine here for the yield used below. White-outlined fields were filled by the last live fetch. <span class="pk-legend-good">Green</span> = best price for you, <span class="pk-legend-bad">red</span> = worst.</p>
       <p class="bonus-note">Recipe: <b>${recipeLabel(resource, tierNum, state.enchant)}</b> — the return rate applies to every input.</p>
-      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
+      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — or its own recent average — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
       <div class="settings-row">
         <div class="field"><label>Batch size</label><input type="number" min="1" step="1" id="batch-${resource.key}" value="${state.batch}"></div>
         <div class="field"><label>Sales tax %</label><input type="number" min="0" step="0.5" id="tax-${resource.key}" value="${state.tax}"></div>
@@ -3785,6 +3849,15 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
         cityPrices[side + 'Ts'] = f.ts;
         filled++;
       });
+
+      // History anchor: pull recent daily averages so a live price far from its
+      // own history gets flagged even when every city is quiet. Best-effort —
+      // the live prices above are already stored; this only sharpens the flags.
+      try {
+        const histUrl = `https://${region}.albion-online-data.com/api/v2/stats/charts/${itemIds.join(',')}.json?locations=${CITIES.map(encodeURIComponent).join(',')}&time-scale=24`;
+        const hresp = await fetch(histUrl);
+        if (hresp.ok) ingestHistory(await hresp.json(), tierNum);
+      } catch (e) { /* history unavailable; live prices stand on their own */ }
 
       save();
       snapshotPrices();
