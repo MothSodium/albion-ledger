@@ -659,7 +659,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.43";
+  const APP_VERSION_NAME = "1.44";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1019,9 +1019,9 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     let lowerCity = null, lowerPrice = Infinity, lowerEst = false;
     let sellCity = null, sellPrice = -Infinity, sellEst = false;
     const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
-    const rawT = trollFlags(resource.key, 'raw');
-    const lowerT = trollFlags(resource.key, 'lower');
-    const refT = trollFlags(resource.key, 'refined');
+    const rawT = trollFlags(resource.key, 'raw', tier);
+    const lowerT = trollFlags(resource.key, 'lower', tier);
+    const refT = trollFlags(resource.key, 'refined', tier);
     const buySel = (state.buyCitySel && state.buyCitySel[resource.key]) || 'auto';
     const lowerSel = (state.lowerCitySel && state.lowerCitySel[resource.key]) || 'auto';
     const sellSel = (state.sellCitySel && state.sellCitySel[resource.key]) || 'auto';
@@ -1029,36 +1029,36 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const excludedReason = (city) => `${city} is excluded from routes — turn on "Include Caerleon in buy/sell" or pick another city.`;
     if (buySel !== 'auto') {
       if (!routeCities.includes(buySel)) return { ok:false, reason: excludedReason(buySel) };
-      const eRaw = effPrice(resource.key, buySel, 'raw', rawT);
+      const eRaw = effPrice(resource.key, buySel, 'raw', rawT, tier);
       if (!eRaw) return { ok:false, reason: `No usable raw buy price in ${buySel} right now (no live price and no recent average).` };
       buyCity = buySel; buyPrice = eRaw.price; buyEst = eRaw.estimated;
     } else {
       routeCities.forEach(c => {
-        const e = effPrice(resource.key, c, 'raw', rawT);
+        const e = effPrice(resource.key, c, 'raw', rawT, tier);
         if (e && e.price < buyPrice) { buyPrice = e.price; buyCity = c; buyEst = e.estimated; }
       });
     }
     if (recipe.lower) {
       if (lowerSel !== 'auto') {
         if (!routeCities.includes(lowerSel)) return { ok:false, reason: excludedReason(lowerSel) };
-        const eLower = effPrice(resource.key, lowerSel, 'lower', lowerT);
+        const eLower = effPrice(resource.key, lowerSel, 'lower', lowerT, tier);
         if (!eLower) return { ok:false, reason: `No usable lower-tier buy price in ${lowerSel} right now (no live price and no recent average).` };
         lowerCity = lowerSel; lowerPrice = eLower.price; lowerEst = eLower.estimated;
       } else {
         routeCities.forEach(c => {
-          const e = effPrice(resource.key, c, 'lower', lowerT);
+          const e = effPrice(resource.key, c, 'lower', lowerT, tier);
           if (e && e.price < lowerPrice) { lowerPrice = e.price; lowerCity = c; lowerEst = e.estimated; }
         });
       }
     }
     if (sellSel !== 'auto') {
       if (!routeCities.includes(sellSel)) return { ok:false, reason: `${sellSel} is excluded from routes — turn on "Include Caerleon in buy/sell" or pick another city.` };
-      const eRef = effPrice(resource.key, sellSel, 'refined', refT);
+      const eRef = effPrice(resource.key, sellSel, 'refined', refT, tier);
       if (!eRef) return { ok:false, reason: `No usable refined sell price in ${sellSel} right now (no live price and no recent average).` };
       sellCity = sellSel; sellPrice = eRef.price; sellEst = eRef.estimated;
     } else {
       routeCities.forEach(c => {
-        const e = effPrice(resource.key, c, 'refined', refT);
+        const e = effPrice(resource.key, c, 'refined', refT, tier);
         if (e && e.price > sellPrice) { sellPrice = e.price; sellCity = c; sellEst = e.estimated; }
       });
     }
@@ -1114,6 +1114,25 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
   // listing, so a live price far from its own recent average is flagged even
   // when every city is quiet (where the cross-city check has nothing to compare).
   const HIST_DAYS = 7, HIST_MIN_COUNT = 8, HIST_RATIO = 3, HIST_MAX_AGE_MS = 3 * 24 * 3600 * 1000;
+  // Enchantment level parsed from a Data Project item_id: T4_ORE -> 0,
+  // T4_ORE@2 -> 2, T4_ORE_LEVEL2@2 -> 2.
+  function histEnch(itemId) {
+    const lm = /_LEVEL(\d)/.exec(itemId || '');
+    if (lm) return parseInt(lm[1], 10);
+    const am = /@(\d+)$/.exec(itemId || '');
+    return am ? parseInt(am[1], 10) : 0;
+  }
+
+  // Which enchantment bucket a history lookup should use for a side.
+  // Mirrors the live scan: rock has no enchanted variants; T4.x recipes use
+  // plain (unenchanted) T3 refined for the lower side.
+  function histLookupEnch(resource, side, tier) {
+    const t = tier || parseInt(state.tier, 10) || 4;
+    const ench = effectiveEnchant(resource, state.enchant) || 0;
+    if (side === 'lower' && t === 4 && ench > 0) return 0;
+    return ench;
+  }
+
   function ingestHistory(data, tierNum) {
     if (!state.history || typeof state.history !== 'object') state.history = {};
     const perVariant = {};
@@ -1139,9 +1158,11 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         if (c > 0 && a > 0) { wSum += a * c; wTot += c; days++; }
       }
       if (wTot <= 0) return;
-      const vkey = resource.key + '|' + entry.location + '|' + side + '|' + (entry.item_id.includes('_LEVEL') ? 'L' : 'G');
+      // Key by enchantment level: an unenchanted average must never stand in
+      // for an enchanted one (or vice versa) — different items, different prices.
+      const vkey = resource.key + '|' + entry.location + '|' + side + '|e' + histEnch(entry.item_id);
       const cur = perVariant[vkey];
-      if (!cur || wTot > cur.wTot) perVariant[vkey] = { wSum, wTot, days };
+      if (!cur || wTot > cur.wTot) perVariant[vkey] = { wSum, wTot, days, ench: histEnch(entry.item_id) };
     });
     const now = Date.now();
     Object.keys(perVariant).forEach(vkey => {
@@ -1150,13 +1171,16 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const v = perVariant[vkey];
       const h = state.history[rkey] || (state.history[rkey] = {});
       const hc = h[city] || (h[city] = {});
-      const ex = hc[side];
-      // Keep the variant with the most backing data; always take the latest fetch.
-      if (!ex || v.wTot >= (ex.count || 0)) hc[side] = { avg: Math.round(v.wSum / v.wTot), count: v.wTot, days: v.days, ts: now };
+      // Drop pre-v1.44 entries stored without an enchantment bucket.
+      Object.keys(hc).forEach(k => { if (!k.includes('|e')) delete hc[k]; });
+      const key = side + '|e' + v.ench;
+      const ex = hc[key];
+      // Keep the series with the most backing data; always take the latest fetch.
+      if (!ex || v.wTot >= (ex.count || 0)) hc[key] = { avg: Math.round(v.wSum / v.wTot), count: v.wTot, days: v.days, ts: now };
     });
   }
 
-  function trollFlags(resourceKey, field) {
+  function trollFlags(resourceKey, field, tier) {
     const prices = state.prices[resourceKey];
     const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
     const vals = routeCities.map(c => prices[c][field]).filter(v => v !== null && v > 0).sort((a, b) => a - b);
@@ -1169,13 +1193,16 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         if (v !== null && v > 0 && (v >= median * TROLL_RATIO || v <= median / TROLL_RATIO)) flags[c] = { reason: 'city' };
       });
     }
-    // History-deviation check: a live price far from its own recent average.
+    // History-deviation check: a live price far from its own recent average
+    // (matched on enchantment — a T4.2 price is never judged against a T4.0 average).
     const hist = (state.history && state.history[resourceKey]) || {};
+    const resource = RESOURCES.find(r => r.key === resourceKey);
+    const enchKey = resource ? field + '|e' + histLookupEnch(resource, field, tier) : null;
     const now = Date.now();
     routeCities.forEach(c => {
       if (flags[c]) return;
       const v = prices[c][field];
-      const h = hist[c] && hist[c][field];
+      const h = enchKey && hist[c] && hist[c][enchKey];
       if (v !== null && v > 0 && h && h.avg > 0 && h.count >= HIST_MIN_COUNT && (now - h.ts) <= HIST_MAX_AGE_MS &&
           (v >= h.avg * HIST_RATIO || v <= h.avg / HIST_RATIO)) {
         flags[c] = { reason: 'history', avg: h.avg };
@@ -1195,9 +1222,12 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
   // Fallback pricing: when a live price is missing or flagged as bait, fall back
   // to the city's recent 7-day history average instead of killing the whole route.
   // An estimate the user can sanity-check beats a blank app.
-  function fallbackAvg(resourceKey, city, field) {
+  function fallbackAvg(resourceKey, city, field, tier) {
     const h = state.history && state.history[resourceKey];
-    const e = h && h[city] && h[city][field];
+    const hc = h && h[city];
+    if (!hc) return 0;
+    const resource = RESOURCES.find(r => r.key === resourceKey);
+    const e = resource ? hc[field + '|e' + histLookupEnch(resource, field, tier)] : null;
     if (!e || !(e.avg > 0)) return 0;
     if ((Date.now() - (e.ts || 0)) > HIST_MAX_AGE_MS) return 0;
     return e.avg;
@@ -1205,19 +1235,19 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 
   // Effective price for route picking: the live price unless it's missing or
   // flagged, in which case the history-average estimate (estimated=true).
-  function effPrice(resourceKey, city, field, flags) {
+  function effPrice(resourceKey, city, field, flags, tier) {
     const live = state.prices[resourceKey][city][field];
     if (!flags[city] && live !== null && live > 0) return { price: live, estimated: false };
-    const avg = fallbackAvg(resourceKey, city, field);
+    const avg = fallbackAvg(resourceKey, city, field, tier);
     return avg > 0 ? { price: avg, estimated: true } : null;
   }
 
   // Small "≈1,234 avg" note under a price cell when the route is using the
   // history-average estimate because the live price is missing/flagged.
-  function avgBadge(resourceKey, city, field, flags) {
+  function avgBadge(resourceKey, city, field, flags, tier) {
     const live = state.prices[resourceKey][city][field];
     if (!flags[city] && live !== null && live > 0) return '';
-    const avg = fallbackAvg(resourceKey, city, field);
+    const avg = fallbackAvg(resourceKey, city, field, tier);
     if (!(avg > 0)) return '';
     return ` <span class="avg-flag" title="Live price is missing or flagged as bait — the route below uses this recent 7-day average estimate instead. Verify in game before hauling.">≈${fmt(avg)} avg</span>`;
   }
@@ -1579,9 +1609,9 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const lo = Math.min(...vals), hi = Math.max(...vals);
       return lo === hi ? null : { lo, hi };
     };
-    const rawT = trollFlags(resource.key, 'raw');
-    const lowerT = recipe.lower ? trollFlags(resource.key, 'lower') : {};
-    const refT = trollFlags(resource.key, 'refined');
+    const rawT = trollFlags(resource.key, 'raw', tierNum);
+    const lowerT = recipe.lower ? trollFlags(resource.key, 'lower', tierNum) : {};
+    const refT = trollFlags(resource.key, 'refined', tierNum);
     const rawX = extremes('raw', rawT);
     const lowerX = recipe.lower ? extremes('lower', lowerT) : null;
     const refX = extremes('refined', refT);
@@ -1605,15 +1635,15 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const lowerPk = pkCls(lowerX, prices[c].lower, false, lowerT[c]);
       const lowerCell = recipe.lower
         ? `<td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 210" class="${lowerLiveCls} ${lowerPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}${avgBadge(resource.key, c, 'lower', lowerT)}</td>`
+             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}${avgBadge(resource.key, c, 'lower', lowerT, tierNum)}</td>`
         : '';
       return `<tr class="${isBonus ? 'bonus-row' : ''}">
         <td class="city-cell">${c}${isBonus ? ' ★' : ''}</td>
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 120" class="${rawLiveCls} ${rawPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}${avgBadge(resource.key, c, 'raw', rawT)}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}${avgBadge(resource.key, c, 'raw', rawT, tierNum)}</td>
         ${lowerCell}
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 340" class="${refLiveCls} ${refPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}${avgBadge(resource.key, c, 'refined', refT)}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}${avgBadge(resource.key, c, 'refined', refT, tierNum)}</td>
       </tr>`;
     }).join('');
 
