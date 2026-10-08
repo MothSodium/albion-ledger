@@ -660,7 +660,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.46";
+  const APP_VERSION_NAME = "1.47";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1852,6 +1852,18 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         if (field === 'lower') state.prices[resource.key][city].lowerWide = false;
         input.classList.remove('live-fill');
         save(); renderResult(resource); renderOverview();
+      });
+      // On commit (blur/Enter), refresh the panel so badges (troll flags, avg
+      // notes, best/worst highlights) re-evaluate the new value. Per-keystroke
+      // would flag half-typed numbers, so this waits for the committed value.
+      // Bonus: catches typos like an extra zero.
+      input.addEventListener('change', () => {
+        const panelEl = document.getElementById('panel-' + resource.key);
+        if (panelEl) {
+          panelEl.innerHTML = renderPanel(resource);
+          attachPanelEvents(resource);
+          renderResult(resource);
+        }
       });
     });
     const batchEl = document.getElementById('batch-' + resource.key);
