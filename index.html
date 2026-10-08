@@ -187,6 +187,7 @@
   .bonus-note b { color: var(--accent-bright); font-weight: 700; }
 
   .settings-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .mini-select { max-width: 148px; font-size: 12px; padding: 4px 6px; }
   .settings-row .field input, .settings-row .field select {
     width: 100%; background: var(--panel-raised); border: 1px solid var(--line-solid); color: var(--text);
     font-family: var(--font); font-size: 13.5px; padding: 10px 12px; border-radius: 13px;
@@ -655,7 +656,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.41";
+  const APP_VERSION_NAME = "1.42";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -883,7 +884,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     crafting: { tier: 4, enchant: 0, category: 'all', qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [] },
     potions: { qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [],
       brewCity: 'brecilien', useFocus: false, useTravel: false, travelRate: 150,
-      pick: 'T6_POTION_COOLDOWN' }
+      pick: 'T6_POTION_COOLDOWN', buyCity: {}, sellCity: 'auto' }
   };
   RESOURCES.forEach(r => { state.prices[r.key] = blankPrices(); });
 
@@ -971,6 +972,8 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
           useTravel: saved.potions.useTravel ?? false,
           travelRate: saved.potions.travelRate ?? 150,
           pick: (typeof saved.potions.pick === 'string' && saved.potions.pick) ? saved.potions.pick : state.potions.pick,
+          buyCity: (saved.potions.buyCity && typeof saved.potions.buyCity === 'object') ? saved.potions.buyCity : {},
+          sellCity: typeof saved.potions.sellCity === 'string' ? saved.potions.sellCity : 'auto',
         });
         state.potions.data = (saved.potions.data && typeof saved.potions.data === 'object') ? saved.potions.data : {};
       }
@@ -3291,6 +3294,37 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       : (bonus ? RETURN_CITY : RETURN_PLAIN);
   }
 
+  // Ingredient price honoring the manual per-ingredient buy city (null = no usable price).
+  function potionIngPrice(hid) {
+    const c = potionCache;
+    if (!c) return null;
+    const sel = (state.potions.buyCity && state.potions.buyCity[hid]) || 'auto';
+    if (sel !== 'auto') {
+      const cp = c.herbCityPrices && c.herbCityPrices[hid];
+      const p = cp ? cp[sel] : 0;
+      return p > 0 ? { price: p, city: sel } : null;
+    }
+    const p = c.herbPrices[hid];
+    return p > 0 ? { price: p, city: c.herbCities[hid] || null } : null;
+  }
+
+  // Potion sell price honoring the manual sell-city override (null = no usable price).
+  function potionSellPrice(id) {
+    const ps = state.potions, c = potionCache;
+    if (!c || !c.sell[id]) return null;
+    const pr = c.sell[id];
+    const sel = ps.sellCity || 'auto';
+    if (sel !== 'auto') {
+      const cp = pr.byCity && pr.byCity[sel];
+      if (!cp) return null;
+      const price = ps.sellMode === 'instant' ? cp.inst : cp.list;
+      return price > 0 ? { price, venue: sel } : null;
+    }
+    if (ps.sellMode === 'instant' && pr.royalInst) return { price: pr.royalInst, venue: pr.royalInstCity };
+    if (ps.sellMode === 'list' && pr.royal) return { price: pr.royal, venue: pr.royalCity };
+    return null;
+  }
+
   // Build result rows from the cached scan + current settings (no refetch).
   function buildPotionRows() {
     const s = state.potions;
@@ -3307,25 +3341,21 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       let herbCost = 0, okH = true, ts = 0;
       const herbBreakdown = [];
       for (const [hid, count] of rec.m) {
-        const p = c.herbPrices[hid];
-        if (!p || p <= 0) { okH = false; break; }
-        herbCost += p * count;
+        const ip = potionIngPrice(hid);
+        if (!ip) { okH = false; break; }
+        herbCost += ip.price * count;
         ts = Math.max(ts, c.herbTs[hid] || 0);
-        herbBreakdown.push([hid, count, p, c.herbCities[hid] || '?']);
+        herbBreakdown.push([hid, count, ip.price, ip.city || '?']);
       }
       if (!okH) { skipped++; return; }
       const silverFee = rec.s || 0;
       // Return rate gives back materials, not the silver fee.
       const effHerb = herbCost * (1 - rate);
       const unitCost = (effHerb + silverFee) / rec.a;
-      const pr = c.sell[id];
-      let price = null, venue = null;
-      if (pr) {
-        ts = Math.max(ts, pr.ts || 0);
-        if (s.sellMode === 'instant' && pr.royalInst) { price = pr.royalInst; venue = pr.royalInstCity; }
-        else if (s.sellMode === 'list' && pr.royal) { price = pr.royal; venue = pr.royalCity; }
-      }
-      if (!price || price <= 0) { skipped++; return; }
+      const sp = potionSellPrice(id);
+      if (!sp) { skipped++; return; }
+      const price = sp.price, venue = sp.venue;
+      ts = Math.max(ts, (c.sell[id] && c.sell[id].ts) || 0);
       // Travel planner estimate: herbs in + potions out (Brecilien legs count double).
       let travelIn = 0, travelOut = 0;
       if (s.brewCity === 'brecilien' && s.useTravel) {
@@ -3374,13 +3404,17 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     </div>
     <div class="panel" style="display:block">
       <div class="panel-title"><h3>Brew → Sell</h3><span>herbs → potions</span></div>
-      <p class="bonus-note">Scans every alchemy recipe using the real in-game ingredients and batch sizes. Herb cost uses the cheapest city price per ingredient (the winning city is shown in each row's breakdown); sell price follows your sell method below. Brecilien's Alchemist's Lab carries the potion bonus: 36.7% material return (53.9% with focus), vs 15.2% (32.2% with focus) brewing anywhere else.</p>
+      <p class="bonus-note">Scans every alchemy recipe using the real in-game ingredients and batch sizes. Herb cost uses the cheapest city price per ingredient unless you pick a city in the recipe planner's Buy in boxes; the Sell city box overrides the automatic best-royal venue. Brecilien's Alchemist's Lab carries the potion bonus: 36.7% material return (53.9% with focus), vs 15.2% (32.2% with focus) brewing anywhere else.</p>
       <div class="settings-row">
         <div class="field"><label>Quantity (potions)</label><input type="number" min="1" step="1" id="potionQty" value="${s.qty}"></div>
         <div class="field"><label>Sales tax %</label><input type="number" min="0" step="0.5" id="potionTax" value="${s.tax}"></div>
         <div class="field"><label>Sell method</label><select id="potionSellMode">
-          <option value="instant" ${s.sellMode === 'instant' ? 'selected' : ''}>Instant sale (best royal city)</option>
-          <option value="list" ${s.sellMode === 'list' ? 'selected' : ''}>List order (best royal city)</option>
+          <option value="instant" ${s.sellMode === 'instant' ? 'selected' : ''}>Instant sale</option>
+          <option value="list" ${s.sellMode === 'list' ? 'selected' : ''}>List order</option>
+        </select></div>
+        <div class="field"><label>Sell city</label><select id="potionSellCity">
+          <option value="auto" ${s.sellCity === 'auto' ? 'selected' : ''}>Auto (best royal)</option>
+          ${CITIES.map(c => `<option value="${c}" ${s.sellCity === c ? 'selected' : ''}>${c}</option>`).join('')}
         </select></div>
         <div class="field"><label>Brew in</label><select id="potionBrewCity">
           <option value="brecilien" ${s.brewCity === 'brecilien' ? 'selected' : ''}>Brecilien (potion bonus)</option>
@@ -3400,6 +3434,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     const qtyEl = document.getElementById('potionQty');
     const taxEl = document.getElementById('potionTax');
     const modeEl = document.getElementById('potionSellMode');
+    const sellCityEl = document.getElementById('potionSellCity');
     const brewEl = document.getElementById('potionBrewCity');
     const focusEl = document.getElementById('potionFocus');
     const travelEl = document.getElementById('potionTravel');
@@ -3428,7 +3463,18 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       s.tax = isNaN(v) || v < 0 ? 0 : v; save();
       refreshPotionRows();
     });
-    modeEl.addEventListener('change', () => { s.sellMode = modeEl.value; save(); refreshPotionRows(); });
+    modeEl.addEventListener('change', () => { s.sellMode = modeEl.value; save(); refreshPotionRows(); renderPotionRecipe(); });
+    sellCityEl.addEventListener('change', () => { s.sellCity = sellCityEl.value; save(); refreshPotionRows(); renderPotionRecipe(); });
+    // Per-ingredient buy-city picks (delegated — the recipe table re-renders often).
+    document.getElementById('potionRecipeOut').addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-potion-buy]');
+      if (!sel) return;
+      s.buyCity = s.buyCity || {};
+      s.buyCity[sel.dataset.potionBuy] = sel.value;
+      save();
+      refreshPotionRows();
+      renderPotionRecipe();
+    });
     brewEl.addEventListener('change', () => { s.brewCity = brewEl.value; save(); syncPotionTravelUI(); refreshPotionRows(); });
     focusEl.addEventListener('change', () => { s.useFocus = focusEl.checked; save(); refreshPotionRows(); });
     travelEl.addEventListener('change', () => { s.useTravel = travelEl.checked; save(); refreshPotionRows(); });
@@ -3447,7 +3493,8 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
   // Pure HTML builder for the recipe planner — DOM-free so it can be unit-tested.
   // ctx is null when no scan has run yet; otherwise:
   // { priceOf(hid)->{price,city}|null, cityPrices(hid)->{city:price}|null,
-  //   sellPrice, venue, rate, brewLbl, useFocus, taxRate, feePct, sellModeLbl }
+  //   buySel->{hid:city|'auto'}, sellPrice, venue, rate, brewLbl, useFocus,
+  //   taxRate, feePct, sellModeLbl }
   function potionRecipeHTML(recId, qty, ctx) {
     const rec = POTION_RECIPES[recId];
     if (!rec) return '<p class="empty-note">Pick a potion above to see its recipe.</p>';
@@ -3462,15 +3509,16 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       const unit = (p && p.price > 0) ? p.price : null;
       const cost = unit ? unit * need : null;
       if (cost) total += cost; else missing++;
-      // Best/worst buy cities, refining-page style: green = cheapest, red = priciest.
+      // Buy-city picker per ingredient: Auto (cheapest) or any city with a price.
       let buyCell = '—';
       const cp = ctx ? ctx.cityPrices(hid) : null;
-      const cities = cp ? Object.keys(cp).filter(c => cp[c] > 0) : [];
-      if (cities.length) {
-        let best = cities[0], worst = cities[0];
-        cities.forEach(c => { if (cp[c] < cp[best]) best = c; if (cp[c] > cp[worst]) worst = c; });
-        buyCell = `<span class="pk-legend-good">${best}</span> ≈${fmt(cp[best])}`;
-        if (worst !== best) buyCell += `<br><span class="pk-legend-bad">${worst}</span> ≈${fmt(cp[worst])}`;
+      const cities = cp ? Object.keys(cp).filter(c => cp[c] > 0).sort((a, b) => cp[a] - cp[b]) : [];
+      if (ctx && cities.length) {
+        const sel = (ctx.buySel && ctx.buySel[hid]) || 'auto';
+        const best = cities[0];
+        const opts = `<option value="auto"${sel === 'auto' ? ' selected' : ''}>Auto (${best} · ${fmt(cp[best])})</option>` +
+          cities.map(c => `<option value="${c}"${sel === c ? ' selected' : ''}>${c} · ${fmt(cp[c])}</option>`).join('');
+        buyCell = `<select data-potion-buy="${hid}" class="mini-select" aria-label="Buy ${herbDisplayName(hid)} in">${opts}</select>`;
       } else if (p && p.city) {
         buyCell = `<span class="pk-legend-good">${p.city}</span>`;
       }
@@ -3507,7 +3555,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       <div class="craft-detail-title">${rec.n} — ${batches} brew${batches === 1 ? '' : 's'} → ${fmt(made)} potions</div>
       <p class="bonus-note"><span class="pk-legend-good">Green</span> = cheapest city to buy, <span class="pk-legend-bad">red</span> = priciest.</p>
       <div class="table-scroll"><table class="price-table">
-        <thead><tr><th>Ingredient</th><th>Needed</th><th>Buy</th><th>Each</th><th>Total</th></tr></thead>
+        <thead><tr><th>Ingredient</th><th>Needed</th><th>Buy in</th><th>Each</th><th>Total</th></tr></thead>
         <tbody>${body}
         <tr class="craft-total-row"><td colspan="4" style="text-align:right"><b>Shopping total</b></td><td class="city-cell"><b>${missing ? '≈' : ''}${fmt(total)}</b></td></tr>
         </tbody>
@@ -3526,17 +3574,14 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     if (c) {
       const rec = POTION_RECIPES[s.pick];
       let sellPrice = null, venue = null;
-      if (rec && c.sell && c.sell[s.pick]) {
-        const pr = c.sell[s.pick];
-        if (s.sellMode === 'instant' && pr.royalInst) { sellPrice = pr.royalInst; venue = pr.royalInstCity; }
-        else if (s.sellMode === 'list' && pr.royal) { sellPrice = pr.royal; venue = pr.royalCity; }
+      if (rec) {
+        const sp = potionSellPrice(s.pick);
+        if (sp) { sellPrice = sp.price; venue = sp.venue; }
       }
       ctx = {
-        priceOf: (hid) => {
-          const p = c.herbPrices[hid];
-          return (p > 0) ? { price: p, city: c.herbCities[hid] || null } : null;
-        },
+        priceOf: (hid) => potionIngPrice(hid),
         cityPrices: (hid) => (c.herbCityPrices && c.herbCityPrices[hid]) || null,
+        buySel: s.buyCity || {},
         sellPrice, venue,
         rate: potionReturnRate(),
         brewLbl: s.brewCity === 'brecilien' ? 'Brecilien' : 'a royal city (no bonus)',
@@ -3732,8 +3777,11 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
           if (!resp.ok) throw new Error('server responded with ' + resp.status);
           const arr = await resp.json();
           (Array.isArray(arr) ? arr : []).forEach(e => {
-            const rec = sell[e.item_id] || (sell[e.item_id] = { royalInst: null, royalInstCity: null, royal: null, royalCity: null, ts: 0 });
+            const rec = sell[e.item_id] || (sell[e.item_id] = { royalInst: null, royalInstCity: null, royal: null, royalCity: null, ts: 0, byCity: {} });
             if (CITIES.includes(e.city)) {
+              const cp = rec.byCity[e.city] || (rec.byCity[e.city] = { list: 0, inst: 0 });
+              if (e.buy_price_max > 0 && e.buy_price_max > cp.inst) cp.inst = e.buy_price_max;
+              if (e.sell_price_min > 0 && (!cp.list || e.sell_price_min < cp.list)) cp.list = e.sell_price_min;
               if (e.buy_price_max > 0 && (!rec.royalInst || e.buy_price_max > rec.royalInst)) { rec.royalInst = e.buy_price_max; rec.royalInstCity = e.city; }
               if (e.sell_price_min > 0 && (!rec.royal || e.sell_price_min > rec.royal)) { rec.royal = e.sell_price_min; rec.royalCity = e.city; }
               rec.ts = Math.max(rec.ts, entryTs(e, ['buy_price_max_date', 'sell_price_min_date', 'sell_price_max_date']));
