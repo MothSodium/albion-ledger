@@ -487,12 +487,17 @@
 <header class="hero">
     <h1>Trade Ledger — Live</h1>
     <div class="app-version" id="app-version"></div>
-    <p>Live Albion market prices across six workshops — refining, crafting, flipping, Black Market, potions — plus profit alerts. Every price field stays editable.</p>
+    <p>Live Albion market prices across six workshops — refining, the capital allocator, crafting, flipping, Black Market, potions — plus profit alerts. Every price field stays editable.</p>
   </header>
     <div class="home-grid">
       <button class="cat-card" data-view="refining" style="--cat:#f59e0b">
         <span class="cat-icon">⛏️</span>
-        <span><h2>Refining</h2><p>Buy raw, refine in the bonus city, sell refined. Real recipes, return rates, focus cost and a capital allocator.</p></span>
+        <span><h2>Refining</h2><p>Buy raw, refine in the bonus city, sell refined. Real recipes, return rates and focus cost.</p></span>
+        <span class="go">→</span>
+      </button>
+      <button class="cat-card" data-view="allocator" style="--cat:#14b8a5">
+        <span class="cat-icon">💰</span>
+        <span><h2>Capital allocator</h2><p>Splits a silver budget across the profitable refining routes, best return-on-cost first. Step-by-step buy, refine and sell plans.</p></span>
         <span class="go">→</span>
       </button>
       <button class="cat-card" data-view="crafting" style="--cat:#3b82f6">
@@ -586,18 +591,22 @@
     <div id="overviewList"></div>
   </div>
 
+  <nav class="tabs" id="tabs"></nav>
+  <div id="panels"></div>
+
+  </div>
+
+  <div class="view" id="view-allocator" style="--cat:#14b8a5">
+    <div class="view-head" style="--cat:#14b8a5"><button class="back-btn" data-view="home">‹ Home</button><span class="dot"></span><h2>💰 Capital allocator</h2></div>
     <div class="advisor-block" id="allocatorBlock" style="background:var(--panel);border:1px solid var(--line-solid);border-radius:var(--radius);padding:14px 16px;margin-top:14px;">
       <div class="panel-title"><h3 class="advisor-title">Capital allocator</h3><span>budget → batches</span></div>
-      <p class="bonus-note">Splits a silver budget across the profitable refining routes above, best return-on-cost first. Each route gets a step-by-step list: what to buy, where to refine, where to sell.</p>
+      <p class="bonus-note">Splits a silver budget across the profitable refining routes, best return-on-cost first. Each route gets a step-by-step list: what to buy, where to refine, where to sell. Routes use your refining tier, enchant and city settings.</p>
       <div class="settings-row">
         <div class="field"><label>Silver budget</label><input type="number" min="0" step="1000" id="allocBudget" value="1000000"></div>
         <div class="field"><label>&nbsp;</label><button class="btn-primary" id="allocBtn">Allocate</button></div>
       </div>
       <div id="allocResults"><p class="empty-note">Enter a budget and hit Allocate.</p></div>
     </div>
-  <nav class="tabs" id="tabs"></nav>
-  <div id="panels"></div>
-
   </div>
 
   <div class="view" id="view-crafting" style="--cat:#3b82f6">
@@ -660,7 +669,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.48";
+  const APP_VERSION_NAME = "1.49";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -3979,7 +3988,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
   }
 
   // ---- View router (home + four workshops) ----
-  const VIEWS = ['home', 'refining', 'crafting', 'flipping', 'blackmarket', 'potions', 'alerts'];
+  const VIEWS = ['home', 'refining', 'allocator', 'crafting', 'flipping', 'blackmarket', 'potions', 'alerts'];
   function showView(name) {
     if (!VIEWS.includes(name)) name = 'home';
     state.view = name; save();
