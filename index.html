@@ -250,6 +250,7 @@
   /* Wide-book flag on refining price inputs: the city's sell book spanned a huge range */
   .wide-flag { font-size: 11px; margin-left: 4px; color: var(--text-dim); cursor: help; white-space: nowrap; }
   .avg-flag { font-size: 11px; margin-left: 4px; color: #f5a623; cursor: help; white-space: nowrap; }
+  .avg-ref { font-size: 11px; margin-left: 4px; color: var(--text-dim); cursor: help; white-space: nowrap; border-bottom: 1px dotted var(--text-dim); }
   .est-tag { font-size: 11px; font-weight: 600; color: #f5a623; background: rgba(245,166,35,.12); border: 1px solid rgba(245,166,35,.4); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
   .est-banner { margin: 0 0 10px; padding: 8px 12px; font-size: 13px; color: #f5c96b; background: rgba(245,166,35,.08); border: 1px solid rgba(245,166,35,.3); border-radius: 8px; }
   .watch-btn {
@@ -659,7 +660,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.45";
+  const APP_VERSION_NAME = "1.46";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1112,6 +1113,9 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
   // Combo rule: far from BOTH the cross-city median AND its own average.
   // Catches a bait listing the median absorbed because another city is off too.
   const COMBO_RATIO = 2.5;
+  // Disagreement indicator: show the history average for reference when the
+  // live price differs from it by more than this (neutral — not a flag).
+  const AVG_DISAGREE_RATIO = 0.25;
   // History anchor: the Data Project's charts endpoint returns daily average
   // prices + listing counts per city. Averages can't be moved by a single troll
   // listing, so a live price far from its own recent average is flagged even
@@ -1267,6 +1271,24 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const avg = fallbackAvg(resourceKey, city, field, tier);
     if (!(avg > 0)) return '';
     return ` <span class="avg-flag" title="Live price is missing or flagged as bait — the route below uses this recent 7-day average estimate instead. Verify in game before hauling.">≈${fmt(avg)} avg</span>`;
+  }
+
+  // Reference note: when a solid history average exists and the live price
+  // disagrees with it by more than AVG_DISAGREE_RATIO, show the average for
+  // context. The feed sometimes prints prices that never existed (a 15h-old
+  // 810 for ore sitting at 1,303 in game); this doesn't claim which number is
+  // right — it just puts both in front of the user. Neutral, not a flag.
+  function avgRefBadge(resourceKey, city, field, flags, tier) {
+    const live = state.prices[resourceKey][city][field];
+    if ((flags && flags[city]) || live === null || live <= 0) return '';
+    const resource = RESOURCES.find(r => r.key === resourceKey);
+    if (!resource) return '';
+    const h = state.history && state.history[resourceKey];
+    const e = h && h[city] && h[city][field + '|e' + histLookupEnch(resource, field, tier)];
+    if (!e || !(e.avg > 0) || (e.count || 0) < HIST_MIN_COUNT) return '';
+    if ((Date.now() - (e.ts || 0)) > HIST_MAX_AGE_MS) return '';
+    if (Math.abs(live - e.avg) / e.avg <= AVG_DISAGREE_RATIO) return '';
+    return ` <span class="avg-ref" title="Live price and the 7-day average (from real transactions) disagree by more than 25% — one of them is wrong. Check in game.">avg ≈${fmt(e.avg)}</span>`;
   }
 
   function renderOverview() {
@@ -1652,15 +1674,15 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const lowerPk = pkCls(lowerX, prices[c].lower, false, lowerT[c]);
       const lowerCell = recipe.lower
         ? `<td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 210" class="${lowerLiveCls} ${lowerPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}${avgBadge(resource.key, c, 'lower', lowerT, tierNum)}</td>`
+             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}${avgBadge(resource.key, c, 'lower', lowerT, tierNum)}${avgRefBadge(resource.key, c, 'lower', lowerT, tierNum)}</td>`
         : '';
       return `<tr class="${isBonus ? 'bonus-row' : ''}">
         <td class="city-cell">${c}${isBonus ? ' ★' : ''}</td>
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 120" class="${rawLiveCls} ${rawPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}${avgBadge(resource.key, c, 'raw', rawT, tierNum)}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}${avgBadge(resource.key, c, 'raw', rawT, tierNum)}${avgRefBadge(resource.key, c, 'raw', rawT, tierNum)}</td>
         ${lowerCell}
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 340" class="${refLiveCls} ${refPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}${avgBadge(resource.key, c, 'refined', refT, tierNum)}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}${avgBadge(resource.key, c, 'refined', refT, tierNum)}${avgRefBadge(resource.key, c, 'refined', refT, tierNum)}</td>
       </tr>`;
     }).join('');
 
