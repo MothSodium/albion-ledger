@@ -249,6 +249,9 @@
   .age-badge.stale { color: #ff6961; font-weight: 700; }
   /* Wide-book flag on refining price inputs: the city's sell book spanned a huge range */
   .wide-flag { font-size: 11px; margin-left: 4px; color: var(--text-dim); cursor: help; white-space: nowrap; }
+  .avg-flag { font-size: 11px; margin-left: 4px; color: #f5a623; cursor: help; white-space: nowrap; }
+  .est-tag { font-size: 11px; font-weight: 600; color: #f5a623; background: rgba(245,166,35,.12); border: 1px solid rgba(245,166,35,.4); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  .est-banner { margin: 0 0 10px; padding: 8px 12px; font-size: 13px; color: #f5c96b; background: rgba(245,166,35,.08); border: 1px solid rgba(245,166,35,.3); border-radius: 8px; }
   .watch-btn {
     background: var(--panel-raised); border: 1px solid var(--line-solid); border-radius: 999px;
     color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 5px 10px; margin-left: 8px;
@@ -656,7 +659,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.42";
+  const APP_VERSION_NAME = "1.43";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1012,9 +1015,9 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const rate = state.useFocus
       ? (bonus ? RETURN_FOCUS : RETURN_PLAIN_FOCUS)
       : (bonus ? RETURN_CITY : RETURN_PLAIN);
-    let buyCity = null, buyPrice = Infinity;
-    let lowerCity = null, lowerPrice = Infinity;
-    let sellCity = null, sellPrice = -Infinity;
+    let buyCity = null, buyPrice = Infinity, buyEst = false;
+    let lowerCity = null, lowerPrice = Infinity, lowerEst = false;
+    let sellCity = null, sellPrice = -Infinity, sellEst = false;
     const routeCities = state.includeCaerleon ? CITIES : CITIES.filter(c => c !== 'Caerleon');
     const rawT = trollFlags(resource.key, 'raw');
     const lowerT = trollFlags(resource.key, 'lower');
@@ -1026,37 +1029,37 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const excludedReason = (city) => `${city} is excluded from routes — turn on "Include Caerleon in buy/sell" or pick another city.`;
     if (buySel !== 'auto') {
       if (!routeCities.includes(buySel)) return { ok:false, reason: excludedReason(buySel) };
-      const mRaw = prices[buySel].raw;
-      if (rawT[buySel] || !validPrice(mRaw)) return { ok:false, reason: `No usable raw buy price in ${buySel} right now (missing or flagged as bait).` };
-      buyCity = buySel; buyPrice = mRaw;
+      const eRaw = effPrice(resource.key, buySel, 'raw', rawT);
+      if (!eRaw) return { ok:false, reason: `No usable raw buy price in ${buySel} right now (no live price and no recent average).` };
+      buyCity = buySel; buyPrice = eRaw.price; buyEst = eRaw.estimated;
     } else {
       routeCities.forEach(c => {
-        const raw = prices[c].raw;
-        if (!rawT[c] && validPrice(raw) && raw < buyPrice) { buyPrice = raw; buyCity = c; }
+        const e = effPrice(resource.key, c, 'raw', rawT);
+        if (e && e.price < buyPrice) { buyPrice = e.price; buyCity = c; buyEst = e.estimated; }
       });
     }
     if (recipe.lower) {
       if (lowerSel !== 'auto') {
         if (!routeCities.includes(lowerSel)) return { ok:false, reason: excludedReason(lowerSel) };
-        const mLower = prices[lowerSel].lower;
-        if (lowerT[lowerSel] || !validPrice(mLower)) return { ok:false, reason: `No usable lower-tier buy price in ${lowerSel} right now (missing or flagged as bait).` };
-        lowerCity = lowerSel; lowerPrice = mLower;
+        const eLower = effPrice(resource.key, lowerSel, 'lower', lowerT);
+        if (!eLower) return { ok:false, reason: `No usable lower-tier buy price in ${lowerSel} right now (no live price and no recent average).` };
+        lowerCity = lowerSel; lowerPrice = eLower.price; lowerEst = eLower.estimated;
       } else {
         routeCities.forEach(c => {
-          const lower = prices[c].lower;
-          if (!lowerT[c] && validPrice(lower) && lower < lowerPrice) { lowerPrice = lower; lowerCity = c; }
+          const e = effPrice(resource.key, c, 'lower', lowerT);
+          if (e && e.price < lowerPrice) { lowerPrice = e.price; lowerCity = c; lowerEst = e.estimated; }
         });
       }
     }
     if (sellSel !== 'auto') {
       if (!routeCities.includes(sellSel)) return { ok:false, reason: `${sellSel} is excluded from routes — turn on "Include Caerleon in buy/sell" or pick another city.` };
-      const mRef = prices[sellSel].refined;
-      if (refT[sellSel] || !validPrice(mRef)) return { ok:false, reason: `No usable refined sell price in ${sellSel} right now (missing or flagged as bait).` };
-      sellCity = sellSel; sellPrice = mRef;
+      const eRef = effPrice(resource.key, sellSel, 'refined', refT);
+      if (!eRef) return { ok:false, reason: `No usable refined sell price in ${sellSel} right now (no live price and no recent average).` };
+      sellCity = sellSel; sellPrice = eRef.price; sellEst = eRef.estimated;
     } else {
       routeCities.forEach(c => {
-        const refined = prices[c].refined;
-        if (!refT[c] && validPrice(refined) && refined > sellPrice) { sellPrice = refined; sellCity = c; }
+        const e = effPrice(resource.key, c, 'refined', refT);
+        if (e && e.price > sellPrice) { sellPrice = e.price; sellCity = c; sellEst = e.estimated; }
       });
     }
     if (!buyCity || !sellCity) return { ok:false };
@@ -1078,7 +1081,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const margin = netRevenue > 0 ? (profit / netRevenue) * 100 : 0;
     const focusUsed = batch * (state.focusPerUnit || 0);
     const profitPerKFocus = focusUsed > 0 ? profit / (focusUsed / 1000) : null;
-    return { ok:true, buyCity, buyPrice, lowerCity, lowerPrice, sellCity, sellPrice,
+    return { ok:true, buyCity, buyPrice, buyEst, lowerCity, lowerPrice, lowerEst, sellCity, sellPrice, sellEst,
              sellWide: !!(prices[sellCity] && prices[sellCity].refinedWide),
              sellMode,
              refineCity: bonus ? resource.bonusCity : buyCity, bonusUsed: bonus, returnRate: rate, margin,
@@ -1189,6 +1192,36 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     return ` <span class="wide-flag" title="${title}">⚠ troll</span>`;
   }
 
+  // Fallback pricing: when a live price is missing or flagged as bait, fall back
+  // to the city's recent 7-day history average instead of killing the whole route.
+  // An estimate the user can sanity-check beats a blank app.
+  function fallbackAvg(resourceKey, city, field) {
+    const h = state.history && state.history[resourceKey];
+    const e = h && h[city] && h[city][field];
+    if (!e || !(e.avg > 0)) return 0;
+    if ((Date.now() - (e.ts || 0)) > HIST_MAX_AGE_MS) return 0;
+    return e.avg;
+  }
+
+  // Effective price for route picking: the live price unless it's missing or
+  // flagged, in which case the history-average estimate (estimated=true).
+  function effPrice(resourceKey, city, field, flags) {
+    const live = state.prices[resourceKey][city][field];
+    if (!flags[city] && live !== null && live > 0) return { price: live, estimated: false };
+    const avg = fallbackAvg(resourceKey, city, field);
+    return avg > 0 ? { price: avg, estimated: true } : null;
+  }
+
+  // Small "≈1,234 avg" note under a price cell when the route is using the
+  // history-average estimate because the live price is missing/flagged.
+  function avgBadge(resourceKey, city, field, flags) {
+    const live = state.prices[resourceKey][city][field];
+    if (!flags[city] && live !== null && live > 0) return '';
+    const avg = fallbackAvg(resourceKey, city, field);
+    if (!(avg > 0)) return '';
+    return ` <span class="avg-flag" title="Live price is missing or flagged as bait — the route below uses this recent 7-day average estimate instead. Verify in game before hauling.">≈${fmt(avg)} avg</span>`;
+  }
+
   function renderOverview() {
     const list = document.getElementById('overviewList');
     const sortSel = document.getElementById('overviewSort');
@@ -1210,7 +1243,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const cls = res.profit >= 0 ? 'ref-pos' : 'ref-neg';
       return `<div class="rank-row">
         <div><div class="rank-title">${r.raw} → ${r.refined}<button class="watch-btn" data-watch="${r.key}" title="Create a profit alert for this route at its current profit">🔔</button></div>
-        <span class="route">buy ${res.buyCity} → refine ${res.refineCity}${res.bonusUsed ? '' : ' (no bonus)'} → sell ${res.sellCity}</span></div>
+        <span class="route">buy ${res.buyCity} → refine ${res.refineCity}${res.bonusUsed ? '' : ' (no bonus)'} → sell ${res.sellCity}${(res.buyEst || res.lowerEst || res.sellEst) ? ' <span class="est-tag" title="One or more legs use 7-day average estimates">≈avg</span>' : ''}</span></div>
         <div class="rank-nums"><div class="num rank-profit ${cls}">${res.profit >= 0 ? '+' : '−'}${fmt(Math.abs(res.profit))}</div>
         <div class="route ${cls}">${res.margin >= 0 ? '+' : ''}${res.margin.toFixed(1)}% margin · ROI ${res.roi >= 0 ? '+' : ''}${res.roi.toFixed(1)}%</div></div>
       </div>`;
@@ -1572,15 +1605,15 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       const lowerPk = pkCls(lowerX, prices[c].lower, false, lowerT[c]);
       const lowerCell = recipe.lower
         ? `<td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 210" class="${lowerLiveCls} ${lowerPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}</td>`
+             data-resource="${resource.key}" data-city="${c}" data-field="lower" value="${lowerVal}">${trendHtml(resource.key, c, 'lower', false)}${ageBadge(prices[c].lowerTs)}${wideBadge(prices[c].lowerWide)}${trollBadge(lowerT[c])}${avgBadge(resource.key, c, 'lower', lowerT)}</td>`
         : '';
       return `<tr class="${isBonus ? 'bonus-row' : ''}">
         <td class="city-cell">${c}${isBonus ? ' ★' : ''}</td>
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 120" class="${rawLiveCls} ${rawPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="raw" value="${rawVal}">${trendHtml(resource.key, c, 'raw', false)}${ageBadge(prices[c].rawTs)}${wideBadge(prices[c].rawWide)}${trollBadge(rawT[c])}${avgBadge(resource.key, c, 'raw', rawT)}</td>
         ${lowerCell}
         <td><input type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 340" class="${refLiveCls} ${refPk}"
-             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}</td>
+             data-resource="${resource.key}" data-city="${c}" data-field="refined" value="${refVal}">${trendHtml(resource.key, c, 'refined', true)}${ageBadge(prices[c].refinedTs)}${wideBadge(prices[c].refinedWide)}${trollBadge(refT[c])}${avgBadge(resource.key, c, 'refined', refT)}</td>
       </tr>`;
     }).join('');
 
@@ -1594,7 +1627,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         <div class="howto-body">
       <p class="bonus-note">★ <b>${resource.bonusCity}</b> gives the resource-return bonus for this line — refine here for the yield used below. White-outlined fields were filled by the last live fetch. <span class="pk-legend-good">Green</span> = best price for you, <span class="pk-legend-bad">red</span> = worst.</p>
       <p class="bonus-note">Recipe: <b>${recipeLabel(resource, tierNum, state.enchant)}</b> — the return rate applies to every input.</p>
-      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. Use the Raw buy / Lower buy / Sell city boxes to price your own route instead of the automatic picks. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — or its own recent average — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
+      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. Use the Raw buy / Lower buy / Sell city boxes to price your own route instead of the automatic picks. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — or its own recent average — a bait/troll listing in a thin book — so the route below falls back to that city's recent 7-day average (marked 7d avg) instead of giving up. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
         </div>
       </details>
       <div class="settings-row">
@@ -1658,6 +1691,11 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       return;
     }
     const cls = res.profit >= 0 ? 'ref-pos' : 'ref-neg';
+    const anyEst = res.buyEst || res.lowerEst || res.sellEst;
+    const estTag = (est) => est ? ' <span class="est-tag" title="7-day average estimate — the live price looked like bait or was missing">7d avg</span>' : '';
+    const estBanner = anyEst
+      ? `<div class="est-banner">⚠ Some legs use <b>7-day average estimates</b> (the live book looked like bait or was empty) — verify in game before hauling.</div>`
+      : '';
     const rawQty = state.batch * res.recipe.raw;
     const rawTotal = rawQty * res.buyPrice;
     const lowerQty = res.recipe.lower ? state.batch * res.recipe.lower : 0;
@@ -1674,7 +1712,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const step2 = res.recipe.lower ? `
       <li><span class="step-n">2</span><div class="step-body">
         <div class="step-title">Buy lower-tier refined</div>
-        <div class="step-detail">Buy <b>${fmt(lowerQty)}&times; ${lowerItem}</b> in <b>${res.lowerCity}</b> at ~${fmt(res.lowerPrice)} each</div>
+        <div class="step-detail">Buy <b>${fmt(lowerQty)}&times; ${lowerItem}</b> in <b>${res.lowerCity}</b> at ~${fmt(res.lowerPrice)} each${estTag(res.lowerEst)}</div>
         <div class="step-num">≈${fmt(lowerTotal)}</div>
       </div></li>` : '';
     const backDetail = (res.retRawQty > 0 || res.retLowerQty > 0)
@@ -1701,10 +1739,11 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         ${dangerCity ? '<div class="travel-warn">⚠️ This route passes through Caerleon (red zone) — travel protected or with friends.</div>' : ''}
       </div>` : '';
     el.innerHTML = `
+      ${estBanner}
       <ol class="ref-steps">
         <li><span class="step-n">1</span><div class="step-body">
           <div class="step-title">Buy raw</div>
-          <div class="step-detail">Buy <b>${fmt(rawQty)}&times; ${rawItem}</b> in <b>${res.buyCity}</b> at ~${fmt(res.buyPrice)} each</div>
+          <div class="step-detail">Buy <b>${fmt(rawQty)}&times; ${rawItem}</b> in <b>${res.buyCity}</b> at ~${fmt(res.buyPrice)} each${estTag(res.buyEst)}</div>
           <div class="step-num">≈${fmt(rawTotal)}</div>
         </div></li>
         ${step2}
@@ -1715,7 +1754,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         </div></li>
         <li><span class="step-n">${res.recipe.lower ? 4 : 3}</span><div class="step-body">
           <div class="step-title">Sell <span class="step-tag">${sellMethodLbl}</span></div>
-          <div class="step-detail">Sell <b>${fmt(state.batch)}&times; ${outItem}</b> in <b>${res.sellCity}</b> at ~${fmt(res.sellPrice)} each${sellWarn}</div>
+          <div class="step-detail">Sell <b>${fmt(state.batch)}&times; ${outItem}</b> in <b>${res.sellCity}</b> at ~${fmt(res.sellPrice)} each${estTag(res.sellEst)}${sellWarn}</div>
           <div class="step-num">≈${fmt(res.netRevenue)}</div>
         </div></li>
       </ol>
