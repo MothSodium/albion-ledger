@@ -655,7 +655,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.39";
+  const APP_VERSION_NAME = "1.40";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -876,6 +876,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     includeCaerleon: false, view: 'home', compact: false, autoRefresh: true,
     focusPerUnit: 0, allocBudget: 1000000,
     prices: {}, priceHistory: {}, history: {},
+    buyCitySel: {}, sellCitySel: {},
     alerts: { rules: [], log: [] },
     blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'profit', tier: 'all' } },
     flipping: { items: [], quantity: 10, tax: 4, sellMode: 'instant', data: {}, advisor: { max: 80, qty: 10, sort: 'profit' } },
@@ -898,6 +899,8 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         region: saved.region ?? state.region, tier: saved.tier ?? state.tier,
         enchant: saved.enchant ?? state.enchant,
         includeCaerleon: saved.includeCaerleon ?? state.includeCaerleon,
+        buyCitySel: saved.buyCitySel ?? {},
+        sellCitySel: saved.sellCitySel ?? {},
         compact: saved.compact ?? false,
         autoRefresh: saved.autoRefresh ?? state.autoRefresh,
         view: saved.view ?? state.view,
@@ -1012,12 +1015,35 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const rawT = trollFlags(resource.key, 'raw');
     const lowerT = trollFlags(resource.key, 'lower');
     const refT = trollFlags(resource.key, 'refined');
-    routeCities.forEach(c => {
-      const raw = prices[c].raw, refined = prices[c].refined, lower = prices[c].lower;
-      if (!rawT[c] && raw !== null && raw > 0 && raw < buyPrice) { buyPrice = raw; buyCity = c; }
-      if (!refT[c] && refined !== null && refined > 0 && refined > sellPrice) { sellPrice = refined; sellCity = c; }
-      if (!lowerT[c] && lower !== null && lower > 0 && lower < lowerPrice) { lowerPrice = lower; lowerCity = c; }
-    });
+    const buySel = (state.buyCitySel && state.buyCitySel[resource.key]) || 'auto';
+    const sellSel = (state.sellCitySel && state.sellCitySel[resource.key]) || 'auto';
+    const validPrice = (v) => v !== null && v > 0;
+    if (buySel !== 'auto') {
+      // Manual buy city: raw and lower-tier refined are both bought in the chosen city.
+      if (!routeCities.includes(buySel)) return { ok:false, reason: `${buySel} is excluded from routes — turn on "Include Caerleon in buy/sell" or pick another city.` };
+      const mRaw = prices[buySel].raw, mLower = prices[buySel].lower;
+      if (rawT[buySel] || !validPrice(mRaw)) return { ok:false, reason: `No usable raw buy price in ${buySel} right now (missing or flagged as bait).` };
+      if (recipe.lower && (lowerT[buySel] || !validPrice(mLower))) return { ok:false, reason: `No usable lower-tier buy price in ${buySel} right now (missing or flagged as bait).` };
+      buyCity = buySel; buyPrice = mRaw;
+      if (recipe.lower) { lowerCity = buySel; lowerPrice = mLower; }
+    } else {
+      routeCities.forEach(c => {
+        const raw = prices[c].raw, lower = prices[c].lower;
+        if (!rawT[c] && validPrice(raw) && raw < buyPrice) { buyPrice = raw; buyCity = c; }
+        if (recipe.lower && !lowerT[c] && validPrice(lower) && lower < lowerPrice) { lowerPrice = lower; lowerCity = c; }
+      });
+    }
+    if (sellSel !== 'auto') {
+      if (!routeCities.includes(sellSel)) return { ok:false, reason: `${sellSel} is excluded from routes — turn on "Include Caerleon in buy/sell" or pick another city.` };
+      const mRef = prices[sellSel].refined;
+      if (refT[sellSel] || !validPrice(mRef)) return { ok:false, reason: `No usable refined sell price in ${sellSel} right now (missing or flagged as bait).` };
+      sellCity = sellSel; sellPrice = mRef;
+    } else {
+      routeCities.forEach(c => {
+        const refined = prices[c].refined;
+        if (!refT[c] && validPrice(refined) && refined > sellPrice) { sellPrice = refined; sellCity = c; }
+      });
+    }
     if (!buyCity || !sellCity) return { ok:false };
     if (recipe.lower && !lowerCity) return { ok:false };
     const batch = state.batch;
@@ -1553,7 +1579,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         <div class="howto-body">
       <p class="bonus-note">★ <b>${resource.bonusCity}</b> gives the resource-return bonus for this line — refine here for the yield used below. White-outlined fields were filled by the last live fetch. <span class="pk-legend-good">Green</span> = best price for you, <span class="pk-legend-bad">red</span> = worst.</p>
       <p class="bonus-note">Recipe: <b>${recipeLabel(resource, tierNum, state.enchant)}</b> — the return rate applies to every input.</p>
-      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — or its own recent average — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
+      <p class="bonus-note">Buys at the lowest current listing; sells at the lowest listing too — that's what your sell order competes with, so it's the price you'd actually get. Use the Buy city / Sell city boxes to price your own route instead of the automatic cheapest buy and best sell. A ⚠ wide book flag means that city's sell book spanned a huge range (bait or troll listings), so double-check the price in game before hauling. A ⚠ troll flag means the price is far from every other city's — or its own recent average — a bait/troll listing in a thin book — so it's ignored when the route below picks where to buy and sell. "Sell via" switches between list orders (2.5% order setup + your sales tax) and instant sale (tax only). Small gray tags next to each price show how old it is — red means older than 24h.</p>
         </div>
       </details>
       <div class="settings-row">
@@ -1570,6 +1596,18 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
           <select id="bonuscity-${resource.key}">
             <option value="bonus" ${state.useBonusCity !== false ? 'selected' : ''}>Bonus city · ${resource.bonusCity}</option>
             <option value="plain" ${state.useBonusCity === false ? 'selected' : ''}>No bonus city</option>
+          </select>
+        </div>
+        <div class="field"><label>Buy city</label>
+          <select id="buycity-${resource.key}">
+            <option value="auto">Auto (cheapest)</option>
+            ${routeCities.map(c => `<option value="${c}" ${(state.buyCitySel && state.buyCitySel[resource.key]) === c ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Sell city</label>
+          <select id="sellcity-${resource.key}">
+            <option value="auto">Auto (best)</option>
+            ${routeCities.map(c => `<option value="${c}" ${(state.sellCitySel && state.sellCitySel[resource.key]) === c ? 'selected' : ''}>${c}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label class="checkline"><input type="checkbox" id="usefocus-${resource.key}" ${state.useFocus ? 'checked' : ''}> Use focus</label></div>
@@ -1593,7 +1631,9 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     const enchLbl = ench > 0 ? '.' + ench : '';
     const lowerEnchLbl = (tierNum === 4 && ench > 0) ? '' : enchLbl;
     if (!res.ok) {
-      el.innerHTML = '<div class="empty-note">Enter or fetch a raw buy price, a refined sell price, and (for T3+) a lower-tier refined buy price above to see the route and profit.</div>';
+      el.innerHTML = res.reason
+        ? `<div class="empty-note">${res.reason}</div>`
+        : '<div class="empty-note">Enter or fetch a raw buy price, a refined sell price, and (for T3+) a lower-tier refined buy price above to see the route and profit.</div>';
       return;
     }
     const cls = res.profit >= 0 ? 'ref-pos' : 'ref-neg';
@@ -1712,6 +1752,18 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     if (sellModeEl) sellModeEl.addEventListener('change', () => {
       state.refSellMode = sellModeEl.value === 'instant' ? 'instant' : 'list';
       save(); RESOURCES.forEach(renderResult); renderOverview(); syncSharedFields();
+    });
+    const buyCityEl = document.getElementById('buycity-' + resource.key);
+    const sellCityEl = document.getElementById('sellcity-' + resource.key);
+    if (buyCityEl) buyCityEl.addEventListener('change', () => {
+      state.buyCitySel = state.buyCitySel || {};
+      state.buyCitySel[resource.key] = buyCityEl.value;
+      save(); RESOURCES.forEach(renderResult); renderOverview();
+    });
+    if (sellCityEl) sellCityEl.addEventListener('change', () => {
+      state.sellCitySel = state.sellCitySel || {};
+      state.sellCitySel[resource.key] = sellCityEl.value;
+      save(); RESOURCES.forEach(renderResult); renderOverview();
     });
     if (useFocusEl) useFocusEl.addEventListener('change', () => {
       state.useFocus = useFocusEl.checked;
@@ -3757,7 +3809,17 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
 
   const caerleonCheck = document.getElementById('caerleonCheck');
   caerleonCheck.checked = state.includeCaerleon;
-  caerleonCheck.addEventListener('change', () => { state.includeCaerleon = caerleonCheck.checked; save(); renderAll(); });
+  caerleonCheck.addEventListener('change', () => {
+    state.includeCaerleon = caerleonCheck.checked;
+    if (!state.includeCaerleon) {
+      // Manual Caerleon picks would be invalid routes now — fall back to Auto.
+      RESOURCES.forEach(r => {
+        if (state.buyCitySel && state.buyCitySel[r.key] === 'Caerleon') state.buyCitySel[r.key] = 'auto';
+        if (state.sellCitySel && state.sellCitySel[r.key] === 'Caerleon') state.sellCitySel[r.key] = 'auto';
+      });
+    }
+    save(); renderAll();
+  });
 
   const compactCheck = document.getElementById('compactCheck');
   const applyCompact = () => document.body.classList.toggle('compact', !!state.compact);
