@@ -660,7 +660,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.47";
+  const APP_VERSION_NAME = "1.48";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1113,6 +1113,10 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
   // Combo rule: far from BOTH the cross-city median AND its own average.
   // Catches a bait listing the median absorbed because another city is off too.
   const COMBO_RATIO = 2.5;
+  // Broken-book regime: this many flagged cities on one side means the book
+  // can't be trusted at all (the median is corrupted too) — fall back to
+  // history averages for every city on that side.
+  const BROKEN_BOOK_FLAGS = 3;
   // Disagreement indicator: show the history average for reference when the
   // live price differs from it by more than this (neutral — not a flag).
   const AVG_DISAGREE_RATIO = 0.25;
@@ -1227,6 +1231,18 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         flags[c] = { reason: 'combo', avg: h.avg };
       }
     });
+    // Broken-book regime: this many flags on one side means the live book is
+    // mostly fiction and the median is corrupted too — distrust every live
+    // price on this side so the route falls back to history averages.
+    const flaggedCount = routeCities.filter(c => flags[c]).length;
+    if (flaggedCount >= BROKEN_BOOK_FLAGS) {
+      routeCities.forEach(c => {
+        if (!flags[c]) {
+          const h = enchKey && hist[c] && hist[c][enchKey];
+          flags[c] = { reason: 'brokenbook', avg: (h && h.avg) || 0 };
+        }
+      });
+    }
     return flags;
   }
 
@@ -1236,6 +1252,8 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
       ? `Way off its recent ${HIST_DAYS}-day average (~${fmt(flag.avg)}) — likely a bait/troll listing in a thin market book. Ignored when picking the route below; double-check in game before hauling.`
       : flag.reason === 'combo'
       ? `Far above/below every other city AND its own recent ${HIST_DAYS}-day average (~${fmt(flag.avg)}) — almost certainly a bait listing in a thin book. Ignored when picking the route below; double-check in game before hauling.`
+      : flag.reason === 'brokenbook'
+      ? `Most cities on this side looked like bait, so no live price here is trusted — the route uses ${flag.avg > 0 ? `the 7-day average (~${fmt(flag.avg)})` : 'no usable price'} instead. Double-check in game before hauling.`
       : `Far from every other city's price — likely a bait/troll listing in a thin market book. Ignored when picking the route below; double-check in game before hauling.`;
     return ` <span class="wide-flag" title="${title}">⚠ troll</span>`;
   }
