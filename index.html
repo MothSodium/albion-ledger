@@ -809,7 +809,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.50";
+  const APP_VERSION_NAME = "1.51";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -4130,14 +4130,25 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
 
   // ---- View router (home + four workshops) ----
   const VIEWS = ['home', 'refining', 'allocator', 'crafting', 'flipping', 'blackmarket', 'potions', 'alerts'];
-  function showView(name) {
+  function showView(name, push = true) {
     if (!VIEWS.includes(name)) name = 'home';
+    const changed = state.view !== name;
     state.view = name; save();
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const el = document.getElementById('view-' + name);
     if (el) el.classList.add('active');
     window.scrollTo(0, 0);
+    // Push a history entry per view so the Android system back button walks
+    // back through views (Home <- Refining) instead of closing the app.
+    if (push && changed) {
+      try { history.pushState({ view: name }, '', '#' + name); } catch (e) {}
+    }
   }
+  // System back button / browser back: pop to the previous view, don't push.
+  window.addEventListener('popstate', (e) => {
+    const v = (e.state && e.state.view) || (location.hash || '').replace('#', '') || 'home';
+    showView(VIEWS.includes(v) ? v : 'home', false);
+  });
 
   // --- Live fetch ---
   const regionSelect = document.getElementById('regionSelect');
@@ -4364,6 +4375,10 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     });
   });
   applyTheme();
+  // The app always opens on Home: reset the in-memory view and anchor the
+  // history stack here, so the first back press from Home exits the app.
+  state.view = 'home';
+  try { history.replaceState({ view: 'home' }, '', '#home'); } catch (e) {}
   renderTabs();
   renderAll();
   renderAlerts();
