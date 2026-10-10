@@ -872,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.55";
+  const APP_VERSION_NAME = "1.56";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -2453,7 +2453,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
           <h3 class="advisor-title">Transport Advisor</h3>
           <span>auto-scan</span>
         </div>
-        <p class="bonus-note">Scans items across the royal cities and ranks the best buys to haul to the Caerleon <b>Black Market</b> right now. Caerleon is never used as a buy source. Uses your Black Market server, sales tax and sell-method settings above. Set the quantity you're hauling to see total profit and margin.</p>
+        <p class="bonus-note">Scans items across the royal cities and ranks the best buys to haul to the Caerleon <b>Black Market</b> right now. Caerleon is never used as a buy source. Uses your Black Market server, sales tax and sell-method settings above. Figures are per item — the feed doesn't show buy-order sizes, so never assume an order will fill more than one.</p>
         <div class="settings-row">
           <div class="field"><label>Scan source</label>
             <select id="bmAdvSource">
@@ -2473,7 +2473,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
               <option value="8" ${state.blackMarket.advisor.tier === '8' ? 'selected' : ''}>Elder (T8)</option>
             </select>
           </div>
-          <div class="field"><label>Quantity to haul</label><input type="number" min="1" step="1" id="bmAdvQty" value="${state.blackMarket.advisor.qty || 10}"></div>
+
           <div class="field"><label>Sort by</label>
             <select id="bmAdvSort">
               <option value="profit" ${state.blackMarket.advisor.sort === 'profit' ? 'selected' : ''}>Profit</option>
@@ -2683,7 +2683,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     fetchBtnBM.addEventListener('click', fetchBlackMarket);
     const advSourceEl = document.getElementById('bmAdvSource');
     const advMaxEl = document.getElementById('bmAdvMax');
-    const advQtyEl = document.getElementById('bmAdvQty');
+
     const advBtn = document.getElementById('bmAdvBtn');
     const advSortEl = document.getElementById('bmAdvSort');
     const advTierEl = document.getElementById('bmAdvTier');
@@ -2694,12 +2694,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       state.blackMarket.advisor.max = isNaN(v) || v < 1 ? 1 : Math.min(400, v);
       save();
     });
-    advQtyEl.addEventListener('input', () => {
-      const v = parseInt(advQtyEl.value, 10);
-      state.blackMarket.advisor.qty = isNaN(v) || v < 1 ? 1 : Math.min(100000, v);
-      save();
-      if (advisorLastRows.length) renderAdvisorResults(advisorLastRows);
-    });
+
     advBtn.addEventListener('click', runAdvisorScan);
     if (advSortEl) advSortEl.addEventListener('change', () => {
       state.blackMarket.advisor.sort = advSortEl.value; save();
@@ -2803,31 +2798,22 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
   }
 
   let advisorLastRows = [];
-  function advisorQty() {
-    const q = parseInt(state.blackMarket.advisor.qty, 10);
-    return isNaN(q) || q < 1 ? 1 : q;
-  }
   function renderAdvisorResults(rows) {
     advisorLastRows = rows;
     const wrapEl = document.getElementById('bmAdvCards');
     if (!wrapEl) return;
     const sortKey = state.blackMarket.advisor.sort || 'roi';
-    // Sort key is per-item in the stored rows; scale to the haul qty for cards.
-    const qty = advisorQty();
+    // Per-item figures only: the feed doesn't report buy-order sizes, so
+    // multiplying by a haul quantity would imply a fill that may not exist.
     const sorted = rows.slice().sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
     const shown = sorted.slice(0, 30);
     if (shown.length === 0) { wrapEl.innerHTML = ''; return; }
-    const taxRate = sellFeeRate(state.blackMarket.tax, state.blackMarket.sellMode);
     const sellMode = state.blackMarket.sellMode;
     wrapEl.innerHTML = '<div class="flip-list">' + shown.map((r, i) => {
-      const totalProfit = r.profit * qty;
-      const revenue = r.bmPrice * (1 - taxRate) * qty;
-      const margin = revenue > 0 ? (totalProfit / revenue) * 100 : 0;
-      const roi = r.buyPrice > 0 ? (totalProfit / (r.buyPrice * qty)) * 100 : 0;
       return flipCardHTML({
         id: r.id, buyCity: r.buyCity, buyPrice: r.buyPrice, buyTs: r.buyTs,
         sellPrice: r.bmPrice, sellTs: r.bmTs, sellMode,
-        qty, profit: totalProfit, margin, roi,
+        qty: 1, profit: r.profit, margin: r.margin, roi: r.roi,
         bmList: r.bmList || 0, bmInstant: r.bmInstant || 0, uid: 'a' + i,
         qualityName: BM_QUALITY_NAMES[state.blackMarket.quality] || ''
       });
