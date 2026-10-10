@@ -872,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.59";
+  const APP_VERSION_NAME = "1.60";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -2471,7 +2471,6 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
               <option value="both" ${state.blackMarket.advisor.source === 'both' ? 'selected' : ''}>Both</option>
             </select>
           </div>
-          <div class="field"><label>Max items to scan</label><input type="number" min="1" max="1000" step="1" id="bmAdvMax" value="${state.blackMarket.advisor.max}"></div>
           <div class="field"><label>Tier</label>
             <select id="bmAdvTier">
               <option value="all" ${(state.blackMarket.advisor.tier || 'all') === 'all' ? 'selected' : ''}>All tiers</option>
@@ -2701,8 +2700,6 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     });
     fetchBtnBM.addEventListener('click', fetchBlackMarket);
     const advSourceEl = document.getElementById('bmAdvSource');
-    const advMaxEl = document.getElementById('bmAdvMax');
-
     const advBtn = document.getElementById('bmAdvBtn');
     const advSortEl = document.getElementById('bmAdvSort');
     const advTierEl = document.getElementById('bmAdvTier');
@@ -2711,11 +2708,6 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     const advEnchEl = document.getElementById('bmAdvEnchant');
     if (advEnchEl) advEnchEl.addEventListener('change', () => {
       state.blackMarket.advisor.enchant = advEnchEl.value;
-      save();
-    });
-    advMaxEl.addEventListener('input', () => {
-      const v = parseInt(advMaxEl.value, 10);
-      state.blackMarket.advisor.max = isNaN(v) || v < 1 ? 1 : Math.min(400, v);
       save();
     });
 
@@ -2879,8 +2871,8 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
         return m && m[1] === tierFilter;
       });
     }
-    const maxN = Math.max(1, Math.min(400, parseInt(state.blackMarket.advisor.max, 10) || 200));
-    ids = ids.slice(0, maxN);
+    // No cap: scan every candidate. Results already show top 30; the API
+    // handles the full list in ~11 chunked requests.
 
     if (ids.length === 0) {
       statusEl.className = 'error';
