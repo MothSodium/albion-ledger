@@ -872,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.58";
+  const APP_VERSION_NAME = "1.59";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1095,7 +1095,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     prices: {}, priceHistory: {}, history: {},
     buyCitySel: {}, lowerCitySel: {}, sellCitySel: {},
     alerts: { rules: [], log: [] },
-    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'best', tier: 'all' } },
+    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'best', tier: 'all', enchant: 'all' } },
     flipping: { items: [], quantity: 10, tax: 4, sellMode: 'instant', data: {}, advisor: { max: 80, qty: 10, sort: 'profit' } },
     crafting: { tier: 4, enchant: 0, category: 'all', qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [] },
     potions: { qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [],
@@ -1138,7 +1138,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor === 'object') {
           state.blackMarket.advisor.source = ['builtin','tracked','both'].includes(saved.blackMarket.advisor.source) ? saved.blackMarket.advisor.source : 'builtin';
           const mx = parseInt(saved.blackMarket.advisor.max, 10);
-          state.blackMarket.advisor.max = isNaN(mx) || mx < 1 ? 100 : Math.min(400, mx);
+          state.blackMarket.advisor.max = isNaN(mx) || mx < 1 ? 100 : Math.min(1000, mx);
           const aq = parseInt(saved.blackMarket.advisor.qty, 10);
           state.blackMarket.advisor.qty = isNaN(aq) || aq < 1 ? 10 : Math.min(100000, aq);
         }
@@ -1155,6 +1155,10 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.tier === 'string'
             && ['all','4','5','6','7','8'].includes(saved.blackMarket.advisor.tier)) {
           state.blackMarket.advisor.tier = saved.blackMarket.advisor.tier;
+        }
+        if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.enchant === 'string'
+            && ['all','0','1','2','3'].includes(saved.blackMarket.advisor.enchant)) {
+          state.blackMarket.advisor.enchant = saved.blackMarket.advisor.enchant;
         }
       }
       if (saved.flipping && typeof saved.flipping === 'object') {
@@ -2467,7 +2471,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
               <option value="both" ${state.blackMarket.advisor.source === 'both' ? 'selected' : ''}>Both</option>
             </select>
           </div>
-          <div class="field"><label>Max items to scan</label><input type="number" min="1" max="400" step="1" id="bmAdvMax" value="${state.blackMarket.advisor.max}"></div>
+          <div class="field"><label>Max items to scan</label><input type="number" min="1" max="1000" step="1" id="bmAdvMax" value="${state.blackMarket.advisor.max}"></div>
           <div class="field"><label>Tier</label>
             <select id="bmAdvTier">
               <option value="all" ${(state.blackMarket.advisor.tier || 'all') === 'all' ? 'selected' : ''}>All tiers</option>
@@ -2476,6 +2480,15 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
               <option value="6" ${state.blackMarket.advisor.tier === '6' ? 'selected' : ''}>Master (T6)</option>
               <option value="7" ${state.blackMarket.advisor.tier === '7' ? 'selected' : ''}>Grandmaster (T7)</option>
               <option value="8" ${state.blackMarket.advisor.tier === '8' ? 'selected' : ''}>Elder (T8)</option>
+            </select>
+          </div>
+          <div class="field"><label>Enchant</label>
+            <select id="bmAdvEnchant">
+              <option value="all" ${(state.blackMarket.advisor.enchant || 'all') === 'all' ? 'selected' : ''}>All (.0-.3)</option>
+              <option value="0" ${state.blackMarket.advisor.enchant === '0' ? 'selected' : ''}>.0 only</option>
+              <option value="1" ${state.blackMarket.advisor.enchant === '1' ? 'selected' : ''}>.1 only</option>
+              <option value="2" ${state.blackMarket.advisor.enchant === '2' ? 'selected' : ''}>.2 only</option>
+              <option value="3" ${state.blackMarket.advisor.enchant === '3' ? 'selected' : ''}>.3 only</option>
             </select>
           </div>
 
@@ -2695,6 +2708,11 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     const advTierEl = document.getElementById('bmAdvTier');
     advSourceEl.addEventListener('change', () => { state.blackMarket.advisor.source = advSourceEl.value; save(); });
     if (advTierEl) advTierEl.addEventListener('change', () => { state.blackMarket.advisor.tier = advTierEl.value; save(); });
+    const advEnchEl = document.getElementById('bmAdvEnchant');
+    if (advEnchEl) advEnchEl.addEventListener('change', () => {
+      state.blackMarket.advisor.enchant = advEnchEl.value;
+      save();
+    });
     advMaxEl.addEventListener('input', () => {
       const v = parseInt(advMaxEl.value, 10);
       state.blackMarket.advisor.max = isNaN(v) || v < 1 ? 1 : Math.min(400, v);
@@ -2839,6 +2857,20 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     if (src === 'tracked' || src === 'both') ids = ids.concat(state.blackMarket.items);
     if (src === 'builtin' || src === 'both') ids = ids.concat(BM_ADVISOR_CANDIDATES);
     ids = Array.from(new Set(ids.map(s => String(s || '').trim().toUpperCase()).filter(Boolean)));
+    // Expand enchantments: base IDs become .0/.1/.2/.3 variants (API uses @1/@2/@3).
+    const enchSel = state.blackMarket.advisor.enchant || 'all';
+    if (enchSel === 'all') {
+      const expanded = [];
+      ids.forEach(id => {
+        const base = String(id).split('@')[0];
+        expanded.push(base, base + '@1', base + '@2', base + '@3');
+      });
+      ids = Array.from(new Set(expanded));
+    } else if (enchSel !== '0') {
+      ids = ids.map(id => String(id).split('@')[0] + '@' + enchSel);
+    } else {
+      ids = ids.map(id => String(id).split('@')[0]);
+    }
     const tierFilter = state.blackMarket.advisor.tier || 'all';
     const TIER_NAMES = { '4': 'Adept (T4)', '5': 'Expert (T5)', '6': 'Master (T6)', '7': 'Grandmaster (T7)', '8': 'Elder (T8)' };
     if (tierFilter !== 'all') {
