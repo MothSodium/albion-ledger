@@ -872,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.57";
+  const APP_VERSION_NAME = "1.58";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1095,7 +1095,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     prices: {}, priceHistory: {}, history: {},
     buyCitySel: {}, lowerCitySel: {}, sellCitySel: {},
     alerts: { rules: [], log: [] },
-    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'roi', tier: 'all' } },
+    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'best', tier: 'all' } },
     flipping: { items: [], quantity: 10, tax: 4, sellMode: 'instant', data: {}, advisor: { max: 80, qty: 10, sort: 'profit' } },
     crafting: { tier: 4, enchant: 0, category: 'all', qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [] },
     potions: { qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [],
@@ -1144,14 +1144,14 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         }
         state.blackMarket.data = (saved.blackMarket.data && typeof saved.blackMarket.data === 'object') ? saved.blackMarket.data : {};
         if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.sort === 'string'
-            && ['profit','margin','roi'].includes(saved.blackMarket.advisor.sort)) {
+            && ['profit','margin','roi','best'].includes(saved.blackMarket.advisor.sort)) {
           state.blackMarket.advisor.sort = saved.blackMarket.advisor.sort;
         }
-        // v1.55: default sort changed profit -> roi; migrate the untouched old default once.
-        if (!saved.blackMarket.advisorRoiMigrated && state.blackMarket.advisor.sort === 'profit') {
-          state.blackMarket.advisor.sort = 'roi';
+        // v1.58: "Best mix" (profit x ROI) is the new default; migrate untouched old defaults once.
+        if (!saved.blackMarket.advisorBestMigrated && ['profit','roi'].includes(state.blackMarket.advisor.sort)) {
+          state.blackMarket.advisor.sort = 'best';
         }
-        state.blackMarket.advisorRoiMigrated = true;
+        state.blackMarket.advisorBestMigrated = true;
         if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.tier === 'string'
             && ['all','4','5','6','7','8'].includes(saved.blackMarket.advisor.tier)) {
           state.blackMarket.advisor.tier = saved.blackMarket.advisor.tier;
@@ -2458,7 +2458,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
           <h3 class="advisor-title">Transport Advisor</h3>
           <span>auto-scan</span>
         </div>
-        <p class="bonus-note">Scans items across the royal cities and ranks the best buys to haul to the Caerleon <b>Black Market</b> right now. Caerleon is never used as a buy source. Uses your Black Market server, sales tax and sell-method settings above. Figures are per item — the feed doesn't show buy-order sizes, so never assume an order will fill more than one.</p>
+        <p class="bonus-note">Scans items across the royal cities and ranks the best buys to haul to the Caerleon <b>Black Market</b> right now. Caerleon is never used as a buy source. Uses your Black Market server, sales tax and sell-method settings above. Figures are per item — the feed doesn't show buy-order sizes, so never assume an order will fill more than one.<br><b>Best mix</b> ranks by profit boosted by ROI, so tiny high-ROI flips and capital-hungry low-ROI flips both drop down.</p>
         <div class="settings-row">
           <div class="field"><label>Scan source</label>
             <select id="bmAdvSource">
@@ -2481,9 +2481,10 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
 
           <div class="field"><label>Sort by</label>
             <select id="bmAdvSort">
+              <option value="best" ${(state.blackMarket.advisor.sort || 'best') === 'best' ? 'selected' : ''}>Best mix</option>
               <option value="profit" ${state.blackMarket.advisor.sort === 'profit' ? 'selected' : ''}>Profit</option>
               <option value="margin" ${state.blackMarket.advisor.sort === 'margin' ? 'selected' : ''}>Margin %</option>
-              <option value="roi" ${(state.blackMarket.advisor.sort || 'roi') === 'roi' ? 'selected' : ''}>ROI on cost</option>
+              <option value="roi" ${state.blackMarket.advisor.sort === 'roi' ? 'selected' : ''}>ROI on cost</option>
             </select>
           </div>
         </div>
@@ -2792,7 +2793,10 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     const roi = buyPrice > 0 ? (profit / buyPrice) * 100 : 0;
     const revenue = bmPrice * (1 - feeRate);
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-    return { ok: true, buyCity, buyPrice, bmPrice, profit, roi, margin,
+    // Best-mix score: absolute profit boosted by ROI. Rewards flips that make
+    // real silver AND use capital efficiently; punishes tiny high-ROI noise.
+    const best = profit > 0 ? profit * (1 + roi / 100) : profit;
+    return { ok: true, buyCity, buyPrice, bmPrice, profit, roi, margin, best,
       buyTs: (rec && rec.buyTs) || 0, bmTs: (rec && rec.bmTs) || 0, ts: (rec && rec.ts) || 0,
       bmList: rec.bmList || null, bmInstant: rec.bmInstant || null };
   }
@@ -2807,7 +2811,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     advisorLastRows = rows;
     const wrapEl = document.getElementById('bmAdvCards');
     if (!wrapEl) return;
-    const sortKey = state.blackMarket.advisor.sort || 'roi';
+    const sortKey = ['profit','margin','roi','best'].includes(state.blackMarket.advisor.sort) ? state.blackMarket.advisor.sort : 'best';
     // Per-item figures only: the feed doesn't report buy-order sizes, so
     // multiplying by a haul quantity would imply a fill that may not exist.
     const sorted = rows.slice().sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
