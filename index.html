@@ -595,6 +595,11 @@ try {
   }
   .flip-margin.pos { color: var(--profit); border-color: rgba(48, 209, 88, 0.4); }
   .flip-margin.neg { color: var(--loss); border-color: rgba(255, 105, 97, 0.4); }
+  .flip-quality {
+    font-size: 12px; font-weight: 700; white-space: nowrap;
+    border: 1px solid var(--accent); border-radius: 8px; padding: 5px 9px;
+    color: var(--accent-bright); background: rgba(10, 132, 255, 0.10);
+  }
   .flip-name { font-size: 16px; font-weight: 700; }
   .flip-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 1px; }
   .flip-cols { display: flex; align-items: stretch; gap: 8px; }
@@ -867,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.54";
+  const APP_VERSION_NAME = "1.55";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1090,7 +1095,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     prices: {}, priceHistory: {}, history: {},
     buyCitySel: {}, lowerCitySel: {}, sellCitySel: {},
     alerts: { rules: [], log: [] },
-    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'profit', tier: 'all' } },
+    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'roi', tier: 'all' } },
     flipping: { items: [], quantity: 10, tax: 4, sellMode: 'instant', data: {}, advisor: { max: 80, qty: 10, sort: 'profit' } },
     crafting: { tier: 4, enchant: 0, category: 'all', qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [] },
     potions: { qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [],
@@ -2471,9 +2476,9 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
           <div class="field"><label>Quantity to haul</label><input type="number" min="1" step="1" id="bmAdvQty" value="${state.blackMarket.advisor.qty || 10}"></div>
           <div class="field"><label>Sort by</label>
             <select id="bmAdvSort">
-              <option value="profit" ${(state.blackMarket.advisor.sort || 'profit') === 'profit' ? 'selected' : ''}>Profit</option>
+              <option value="profit" ${state.blackMarket.advisor.sort === 'profit' ? 'selected' : ''}>Profit</option>
               <option value="margin" ${state.blackMarket.advisor.sort === 'margin' ? 'selected' : ''}>Margin %</option>
-              <option value="roi" ${state.blackMarket.advisor.sort === 'roi' ? 'selected' : ''}>ROI on cost</option>
+              <option value="roi" ${(state.blackMarket.advisor.sort || 'roi') === 'roi' ? 'selected' : ''}>ROI on cost</option>
             </select>
           </div>
         </div>
@@ -2499,9 +2504,10 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     return `<div class="flip-card">
       <div class="flip-top">
         <span class="flip-margin ${mCls}">${o.margin >= 0 ? '+' : '−'}${Math.abs(o.margin).toFixed(1)}%</span>
+        ${o.qualityName ? `<span class="flip-quality" title="Buy order needs this item quality">⚔ ${o.qualityName}</span>` : ''}
         <div class="flip-item">
           <div class="flip-name">${name}</div>
-          <div class="flip-sub">${o.id} · ${ench} · <b>${o.qualityName || ''}</b></div>
+          <div class="flip-sub">${o.id} · ${ench}</div>
         </div>
       </div>
       <div class="flip-cols">
@@ -2805,7 +2811,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     advisorLastRows = rows;
     const wrapEl = document.getElementById('bmAdvCards');
     if (!wrapEl) return;
-    const sortKey = state.blackMarket.advisor.sort || 'profit';
+    const sortKey = state.blackMarket.advisor.sort || 'roi';
     // Sort key is per-item in the stored rows; scale to the haul qty for cards.
     const qty = advisorQty();
     const sorted = rows.slice().sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
