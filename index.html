@@ -872,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.60";
+  const APP_VERSION_NAME = "1.61";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1095,7 +1095,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
     prices: {}, priceHistory: {}, history: {},
     buyCitySel: {}, lowerCitySel: {}, sellCitySel: {},
     alerts: { rules: [], log: [] },
-    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'best', tier: 'all', enchant: 'all' } },
+    blackMarket: { items: [], quantity: 100, tax: 4, sellMode: 'instant', quality: 2, data: {}, advisor: { source: 'builtin', max: 200, qty: 10, sort: 'best', tier: 'all', enchant: 'all', buyCity: 'all' } },
     flipping: { items: [], quantity: 10, tax: 4, sellMode: 'instant', data: {}, advisor: { max: 80, qty: 10, sort: 'profit' } },
     crafting: { tier: 4, enchant: 0, category: 'all', qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [] },
     potions: { qty: 10, tax: 4, sellMode: 'instant', data: {}, lastRows: [],
@@ -1159,6 +1159,10 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
         if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.enchant === 'string'
             && ['all','0','1','2','3'].includes(saved.blackMarket.advisor.enchant)) {
           state.blackMarket.advisor.enchant = saved.blackMarket.advisor.enchant;
+        }
+        if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.buyCity === 'string'
+            && (saved.blackMarket.advisor.buyCity === 'all' || BM_BUY_CITIES.includes(saved.blackMarket.advisor.buyCity))) {
+          state.blackMarket.advisor.buyCity = saved.blackMarket.advisor.buyCity;
         }
       }
       if (saved.flipping && typeof saved.flipping === 'object') {
@@ -2481,6 +2485,12 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
               <option value="8" ${state.blackMarket.advisor.tier === '8' ? 'selected' : ''}>Elder (T8)</option>
             </select>
           </div>
+          <div class="field"><label>Buy city</label>
+            <select id="bmAdvBuyCity">
+              <option value="all" ${(state.blackMarket.advisor.buyCity || 'all') === 'all' ? 'selected' : ''}>All (cheapest)</option>
+              ${BM_BUY_CITIES.map(c => `<option value="${c}" ${state.blackMarket.advisor.buyCity === c ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          </div>
           <div class="field"><label>Enchant</label>
             <select id="bmAdvEnchant">
               <option value="all" ${(state.blackMarket.advisor.enchant || 'all') === 'all' ? 'selected' : ''}>All (.0-.3)</option>
@@ -2597,6 +2607,26 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
       });
     }).join('') + '</div>';
   }
+  // Rebuild result rows from cached raw prices (buy-city changed) — no API fetch.
+  function recomputeAdvisorRows() {
+    if (!advisorRawCache) return;
+    const rows = [];
+    let skipped = 0;
+    advisorRawCache.ids.forEach(id => {
+      const r = computeAdvisorResult(id, advisorRawCache.data[id]);
+      if (r.ok) rows.push(Object.assign({ id }, r));
+      else skipped++;
+    });
+    renderAdvisorResults(rows);
+    const statusEl = document.getElementById('bmAdvStatus');
+    if (statusEl) {
+      const buyCitySel = state.blackMarket.advisor.buyCity || 'all';
+      const when = new Date().toLocaleTimeString();
+      statusEl.textContent = `Scanned ${advisorRawCache.ids.length} items at ${when} — ${rows.length} with usable prices` +
+        (skipped > 0 ? `, ${skipped} skipped (no data on one side)` : '') +
+        (buyCitySel !== 'all' ? ` · buy in ${buyCitySel}` : '') + '.';
+    }
+  }
 
   function attachBlackMarketEvents() {
     const searchEl = document.getElementById('bmSearch');
@@ -2705,6 +2735,12 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
     const advTierEl = document.getElementById('bmAdvTier');
     advSourceEl.addEventListener('change', () => { state.blackMarket.advisor.source = advSourceEl.value; save(); });
     if (advTierEl) advTierEl.addEventListener('change', () => { state.blackMarket.advisor.tier = advTierEl.value; save(); });
+    const advBuyCityEl = document.getElementById('bmAdvBuyCity');
+    if (advBuyCityEl) advBuyCityEl.addEventListener('change', () => {
+      state.blackMarket.advisor.buyCity = advBuyCityEl.value;
+      save();
+      recomputeAdvisorRows();
+    });
     const advEnchEl = document.getElementById('bmAdvEnchant');
     if (advEnchEl) advEnchEl.addEventListener('change', () => {
       state.blackMarket.advisor.enchant = advEnchEl.value;
@@ -2791,10 +2827,17 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
   // sell to the Caerleon Black Market. Ranks by profit per item.
   function computeAdvisorResult(itemId, rec) {
     let buyCity = null, buyPrice = Infinity;
-    BM_BUY_CITIES.forEach(c => {
-      const p = rec && rec.cities ? rec.cities[c] : null;
-      if (p && p > 0 && p < buyPrice) { buyPrice = p; buyCity = c; }
-    });
+    const buyCitySel = state.blackMarket.advisor.buyCity || 'all';
+    if (buyCitySel === 'all') {
+      BM_BUY_CITIES.forEach(c => {
+        const p = rec && rec.cities ? rec.cities[c] : null;
+        if (p && p > 0 && p < buyPrice) { buyPrice = p; buyCity = c; }
+      });
+    } else {
+      // Pinned city: price it where you're standing, skip if no data there.
+      const p = rec && rec.cities ? rec.cities[buyCitySel] : null;
+      if (p && p > 0) { buyCity = buyCitySel; buyPrice = p; }
+    }
     const bmPrice = state.blackMarket.sellMode === 'instant' ? (rec && rec.bmInstant) : (rec && rec.bmList);
     if (!buyCity) return { ok: false };
     if (!bmPrice || bmPrice <= 0) return { ok: false };
@@ -2817,6 +2860,7 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
   }
 
   let advisorLastRows = [];
+  let advisorRawCache = null;
   function renderAdvisorResults(rows) {
     advisorLastRows = rows;
     const wrapEl = document.getElementById('bmAdvCards');
@@ -2920,6 +2964,8 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
         } catch (e) { failedChunks++; }
       }
 
+      // Cache raw data so buy-city / sort changes recompute instantly without re-fetching.
+      advisorRawCache = { ids: ids.slice(), data };
       const rows = [];
       let skipped = 0;
       ids.forEach(id => {
@@ -2927,7 +2973,6 @@ const POTION_RECIPES={"T2_POTION_HEAL":{"t":2,"n":"Minor Healing Potion","m":[["
         if (r.ok) rows.push(Object.assign({ id }, r));
         else skipped++;
       });
-      rows.sort((a, b) => b.profit - a.profit);
       renderAdvisorResults(rows);
 
       const now = new Date();
