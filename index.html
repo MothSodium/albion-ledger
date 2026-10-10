@@ -872,7 +872,7 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
 (function(){
   /* ============ In-app self-updater (v1.30) ============ */
   const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.56";
+  const APP_VERSION_NAME = "1.57";
   const UPDATE_MANIFEST_URL = "https://mothsodium.github.io/albion-ledger/version.json";
 
   function getUpdatePlugin() {
@@ -1147,6 +1147,11 @@ const BM_ITEM_CATALOG=[["T4_ARTEFACT_ARMOR_CLOTH_MORGANA","Adept's Alluring Amul
             && ['profit','margin','roi'].includes(saved.blackMarket.advisor.sort)) {
           state.blackMarket.advisor.sort = saved.blackMarket.advisor.sort;
         }
+        // v1.55: default sort changed profit -> roi; migrate the untouched old default once.
+        if (!saved.blackMarket.advisorRoiMigrated && state.blackMarket.advisor.sort === 'profit') {
+          state.blackMarket.advisor.sort = 'roi';
+        }
+        state.blackMarket.advisorRoiMigrated = true;
         if (saved.blackMarket.advisor && typeof saved.blackMarket.advisor.tier === 'string'
             && ['all','4','5','6','7','8'].includes(saved.blackMarket.advisor.tier)) {
           state.blackMarket.advisor.tier = saved.blackMarket.advisor.tier;
